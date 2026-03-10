@@ -25,12 +25,15 @@ async def test_server():
             result = await session.call_tool("direct_refactor", {"intent": "test de integracion de red"})
             
             print("[+] RESULTADO DEL SERVIDOR:")
+            server_ok = False
             try:
-                print(json.dumps(json.loads(result.content[0].text), indent=2))
+                payload = json.loads(result.content[0].text)
+                server_ok = payload.get("status") == "OK"
+                print(json.dumps(payload, indent=2))
             except Exception:
                 print(result.content[0].text)
             
-            if "SWARM_AWAKE" in result.content[0].text or "CACHE_HIT" in result.content[0].text:
+            if server_ok:
                 print("\n[Veredicto] AGENT_ORQUESTOR: 100% FUNCIONAL")
             else:
                 print("\n[Veredicto] AGENT_ORQUESTOR: ERROR EN RESPUESTA")
