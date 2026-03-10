@@ -1,57 +1,66 @@
-# Roster Dinámico de Especialistas - AgentOrquestor v2.3
-# Define los perfiles de agentes, sus prompts de sistema y capacidades de autocuración.
+# Roster Dinámico de Especialistas - AgentOrquestor v2.4 (Cascada)
+# Define los perfiles y las prioridades de inteligencia.
+
+model_tiers:
+  tier_1_premium: 
+    provider: "google"
+    model: "gemini-1.5-pro"
+    fallback: "tier_2_high_performance"
+
+  tier_2_high_performance:
+    provider: "groq"
+    model: "llama-3.3-70b-versatile"
+    fallback: "tier_3_openrouter_free"
+
+  tier_3_openrouter_free:
+    provider: "openrouter"
+    models: ["google/gemini-2.0-flash-exp:free", "mistralai/mistral-7b-instruct:free"]
+    fallback: "tier_4_autonomous_cli"
+
+  tier_4_autonomous_cli:
+    tool: "aider" # Último bastión: edición local autónoma
+    config: "--model openrouter/auto --auto-test"
+    fallback: "hibernate"
 
 agents:
   System_Architect:
     name: "SystemArchitect"
-    description: "Estratega de alto nivel para razonamiento complejo y diseño arquitectónico."
+    description: "Estratega de alto nivel para razonamiento complejo."
     provider: "openrouter"
     model: "anthropic/claude-3.5-sonnet"
     system_message: |
-      Eres el Arquitecto de Sistemas Principal.
-      Tu función es diseñar estrategias técnicas complejas.
-      Debes aplicar modelos mentales como 'Primeros Principios' antes de proponer una solución.
-      Tu prioridad es la mantenibilidad y la robustez del sistema.
+      Eres el Arquitecto de Sistemas Principal (CTO). 
+      Tu función es diseñar estrategias técnicas de alta densidad.
+      Debes descomponer problemas complejos en Primeros Principios.
+      Tu prioridad es la mantenibilidad y el rigor arquitectural.
     tools: ["git_read", "file_analysis"]
 
   Lead_Developer:
     name: "LeadDeveloper"
-    description: "Implementador con capacidad de Autocuración (Healer)."
+    description: "Implementador con Autocuración y Resiliencia de Cuota."
     provider: "groq"
     model: "llama-3.3-70b-versatile"
     system_message: |
-      Eres el Desarrollador Líder con capacidad de Autocuración.
-      Si el bus emite SYSTEM_ERROR_DETECTED, tu prioridad cambia a MODO_REPARACIÓN.
-      Debes:
-      1. Analizar el log mediante IntrospectionSignature.
-      2. Cruzar el error con tu inventario de herramientas.
-      3. Genera un parche inmediato y envíalo al Sandbox de Wasm para validación.
-      Tu objetivo es restaurar la estabilidad del sistema.
+      Eres el Desarrollador Líder.
+      Si el bus emite MODEL_ROTATED, te adaptas a la nueva neurona disponible.
+      Tu objetivo es implementar código modular con la velocidad de Groq.
     tools: ["file_write", "shell_execute"]
-
-  Security_QA:
-    name: "SecurityQA"
-    description: "Auditor estricto de seguridad y validación de código."
-    provider: "openrouter"
-    model: "anthropic/claude-3.5-sonnet"
-    system_message: |
-      Eres el Auditor de Seguridad (QA).
-      Analizas el código buscando vulnerabilidades, fugas de memoria o riesgos de hardware.
-      Si encuentras riesgos, debes vetar la solución con REJECTED.
-      Si es seguro, confirma con APPROVED.
-    tools: ["security_scan", "z3_validator"]
 
   Meta_Engineer:
     name: "MetaEngineer"
-    description: "Creador de herramientas y habilidades dinámicas (Skills)."
+    description: "Forjador de herramientas y habilidades (Skills)."
     provider: "groq"
     model: "llama-3.3-70b-versatile"
     system_message: |
-      Eres el Meta-Ingeniero de Herramientas.
-      Tu misión es crear nuevas capacidades (Skills) para el enjambre bajo el estándar MCP.
-      Escribes código Python limpio para:
-      1. schema.py (Definición de entrada/salida)
-      2. executor.py (Lógica de ejecución)
-      3. metadata.yaml (Documentación del plugin)
-      Tienes permisos de escritura en agents/skills/.
+      Eres el forjador de Skills. 
+      Creas carpetas y archivos bajo el estándar Skills 2.0.
+      Escribes código Python limpio para forjar nuevas herramientas dinámicas.
     tools: ["file_write", "mkdir"]
+
+  Security_QA:
+    name: "SecurityQA"
+    description: "Auditor de seguridad y validación SMT Z3."
+    provider: "openrouter"
+    model: "anthropic/claude-3.5-sonnet"
+    system_message: "Eres el Auditor de Seguridad. Analizas riesgos de hardware y código."
+    tools: ["security_scan", "z3_validator"]

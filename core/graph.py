@@ -1,9 +1,8 @@
 """
-AgentOrquestor - Reactive Workflow Graph (v2.3)
-==============================================
-Inspirado en:
-- feat_sniper (Observability)
-- Ultragent (Chained Healing & Log-Level Self-Awareness)
+AgentOrquestor - Reactive Workflow Graph (v2.4 - Cascada de Modelos)
+====================================================================
+Implementa el "Córtex de Cuotas" para la Misión Nocturna.
+Inspirado en: Model Fallback Chain (AIAA).
 """
 
 import gc
@@ -15,47 +14,38 @@ from langgraph.graph import StateGraph, END
 from core.state import AgentState
 from core.persistence import memory
 from core.event_bus import bus
+from core.quota_manager import quota_manager
 
 from core.router import get_semantic_match
 from agents.manager import run_agent_swarm
 from agents.factory import instantiate_squad, cleanup_squad
 from sandbox.manager import secure_eval
 
-# --- 1. LISTENERS DE EVOLUCIÓN (ULTRAGENT STYLE) ---
-
-async def on_task_received(data: Dict[str, Any]):
-    print(f"[ORCHESTRATOR] Reacting to TASK_RECEIVED: {data.get("task", "")[:30]}...")
-    pass
-
-async def on_test_failed(data: Dict[str, Any]):
-    print("[HEALER] Detectado TEST_FAILED. Activando Protocolo Chained Healing...")
-    pass
-
-async def on_vram_alert(data: Dict[str, Any]):
-    print("[SENTINEL] ALERTA: VRAM Crítica (RTX 3060). Forzando GC...")
-    gc.collect()
-    pass
+# --- 1. LISTENERS DE EVOLUCIÓN (ULTRAGENT + QUOTA) ---
 
 async def on_system_error(data: Dict[str, Any]):
-    error_msg = data.get("error")
-    print(f"[HEALER] ¡Emergencia detectada! Iniciando diagnóstico de introspección...")
-    print(f"[LOG] Error: {error_msg[:100]}")
-    # Publicamos evento para que el System_Architect tome el mando
-    await bus.publish("HEAL_REQUESTED", data={
-        "severity": "CRITICAL",
-        "error_context": error_msg
-    })
+    error_msg = data.get("error", "")
+    print(f"[HEALER] Error detectado. Evaluando cuota y diagnóstico...")
+    # Enviamos al gestor de cuotas para evaluar si es un 429
+    await quota_manager.handle_api_error({"error": error_msg})
+    # Disparar también la autocuración
+    await bus.publish("HEAL_REQUESTED", data={"error_context": error_msg})
 
-async def on_missing_capability(data: Dict[str, Any]):
-    print(f"[ORCHESTRATOR] EVOLUCIÓN: EVENT_MISSING_CAPABILITY detectado.")
+async def on_model_rotated(data: Dict[str, Any]):
+    new_tier = data.get("new_tier")
+    print(f"🔄 [ORCHESTRATOR] Cerebro rotado a: {new_tier}. Adaptando Swarm...")
+    # Limpiamos VRAM para asegurar que el nuevo modelo entra limpio
+    gc.collect()
+
+async def on_hibernate(data: Dict[str, Any]):
+    print("💤 [ORCHESTRATOR] SISTEMA EN HIBERNACIÓN. Cuotas agotadas. Grabando checkpoint...")
+    # Aquí se guardaría el estado persistente en disco y se cerraría el daemon
     pass
 
 # Suscripciones iniciales
-bus.subscribe("TASK_RECEIVED", on_task_received)
-bus.subscribe("TEST_FAILED", on_test_failed)
-bus.subscribe("VRAM_THRESHOLD_REACHED", on_vram_alert)
 bus.subscribe("SYSTEM_ERROR_DETECTED", on_system_error)
-bus.subscribe("EVENT_MISSING_CAPABILITY", on_missing_capability)
+bus.subscribe("MODEL_ROTATED", on_model_rotated)
+bus.subscribe("SYSTEM_HIBERNATE", on_hibernate)
 
 # --- 2. NODOS REACTIVOS ---
 
@@ -69,9 +59,9 @@ async def router_node(state: AgentState) -> AgentState:
     return state
 
 async def swarm_node(state: AgentState) -> AgentState:
-    vram = state.hardware_telemetry.get("vram_usage_mb", 0.0)
-    if vram > 5500:
-        await bus.publish("VRAM_THRESHOLD_REACHED", payload={"usage": vram})
+    """Nodo Enjambre con Resiliencia de Cuota."""
+    # El swarm ahora usará el tier actual definido en quota_manager
+    # state.llm_config = get_llm_config_for_tier(quota_manager.current_tier)
     new_state = await run_agent_swarm(state)
     return new_state
 
