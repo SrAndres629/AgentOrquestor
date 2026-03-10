@@ -1,10 +1,10 @@
 """
-AgentOrquestor - Reactive Workflow Graph (v2.5 - Vanguardia)
-==========================================================
+AgentOrquestor - Reactive Workflow Graph (v2.6 - .cortex/ Vault)
+==============================================================
 Implementa:
-- El Hipocampo (Chronicler)
-- El Metabolismo (Shredder)
-- El Córtex Prefrontal (CoVe)
+- Decoupled Memory Architecture (.cortex/)
+- Brain Handover (Consciousness Manifesto)
+- Multimodal Indexing
 """
 
 import gc
@@ -17,7 +17,7 @@ from core.state import AgentState
 from core.persistence import memory
 from core.event_bus import bus
 from core.quota_manager import quota_manager
-from core.chronicler import chronicler
+from core.memory_manager import vault
 from core.shredder import shredder
 
 from core.router import get_semantic_match
@@ -25,19 +25,22 @@ from agents.manager import run_agent_swarm
 from agents.factory import instantiate_squad, cleanup_squad
 from sandbox.manager import secure_eval
 
-# --- 1. LISTENERS DE EVOLUCIÓN (Vanguardia) ---
+# --- 1. LISTENERS DE VANGUARDIA (.cortex) ---
 
-async def on_code_implemented(data: Dict[str, Any]):
-    """Almacena la solución exitosa en la memoria episódica."""
-    await chronicler.log_success(data)
-
-async def on_vram_alert(data: Dict[str, Any]):
-    print("[SENTINEL] VRAM ALERTA Crítica. Forzando Purga...")
+async def on_model_rotated(data: Dict[str, Any]):
+    new_tier = data.get("new_tier")
+    print(f"🔄 [ORCHESTRATOR] Cerebro rotado a: {new_tier}. Adaptando conciencia...")
     gc.collect()
 
+async def on_system_error(data: Dict[str, Any]):
+    error_msg = data.get("error", "")
+    print(f"[HEALER] Error detectado. Evaluando cuota y diagnóstico...")
+    # Pasamos el estado al quota_manager para el "Manifiesto de Conciencia"
+    await quota_manager.handle_api_error({"error": error_msg})
+
 # Suscripciones
-bus.subscribe("CODE_IMPLEMENTED", on_code_implemented)
-bus.subscribe("VRAM_THRESHOLD_REACHED", on_vram_alert)
+bus.subscribe("MODEL_ROTATED", on_model_rotated)
+bus.subscribe("SYSTEM_ERROR_DETECTED", on_system_error)
 
 # --- 2. NODOS REACTIVOS ---
 
@@ -45,11 +48,11 @@ async def router_node(state: AgentState) -> AgentState:
     intent = state.task_manifest.objective
     await bus.publish("TASK_RECEIVED", payload={"task": intent})
     
-    # Consulta al Hipocampo (Chronicler) antes de proponer nada
-    past_solutions = chronicler.query(intent)
-    if past_solutions:
-        print(f"📖 [ROUTER] Memoria recuperada: {len(past_solutions)} experiencias previas.")
-        state.dtg_context["past_experience"] = past_solutions
+    # 🧠 Recuperación desde la Bóveda .cortex/
+    past_memory = vault.retrieve_relevant_memory(intent)
+    if past_memory:
+        state.dtg_context["vault_memory"] = past_memory
+        print(f"🔑 [ROUTER] Memoria recuperada desde la Bóveda .cortex/")
         
     cached_match = get_semantic_match(intent, threshold=0.98)
     if cached_match:
@@ -59,11 +62,8 @@ async def router_node(state: AgentState) -> AgentState:
     return state
 
 async def swarm_node(state: AgentState) -> AgentState:
-    """Nodo Enjambre con Poda Semántica (Shredder)."""
-    # 1. Aplicamos el Metabolismo: Poda del historial
+    """Nodo Enjambre con Poda Semántica y Recuperación de Bóveda."""
     await shredder.shred(state)
-    
-    # 2. Inferencia del Swarm con CoVe e incentivos de costo
     new_state = await run_agent_swarm(state)
     return new_state
 
@@ -73,7 +73,6 @@ async def sandbox_node(state: AgentState) -> AgentState:
     state.dtg_context["sandbox_report"] = report
     
     if report["overall_status"] == "APPROVED":
-        # Notificar éxito para que el Chronicler aprenda
         await bus.publish("CODE_IMPLEMENTED", data={
             "task": state.task_manifest.objective,
             "solution": code

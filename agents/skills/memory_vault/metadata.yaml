@@ -1,0 +1,4 @@
+name: memory_vault_sync
+description: Gestiona la boveda .cortex para memoria multimodal y persistencia de estado.
+version: 2.0
+author: Meta_Engineer
