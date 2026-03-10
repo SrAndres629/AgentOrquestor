@@ -1,0 +1,21 @@
+version: "1.0-alpha"
+namespace: "io.agentorquestor.skills.git"
+name: "git_autocommit_professional"
+description: "Generación autónoma y profesional de commits semánticos y pushes al repositorio actual basándose en el análisis estructural de los diffs, asegurando invariantes Z3."
+author: "agentOrquestor-v1"
+capabilities:
+  - type: "git_analysis"
+    access_level: "read-only"
+  - type: "git_commit"
+    access_level: "isolated"
+  - type: "git_push"
+    access_level: "isolated"
+events:
+  consumes:
+    - "core.telemetry.ebpf_trigger"
+    - "git.workspace.changed"
+  produces:
+    - "git.repository.synced"
+constraints:
+  timeout_ms: 15000
+  max_memory_mb: 128

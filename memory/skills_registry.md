@@ -25,6 +25,17 @@ events:
 constraints:
   timeout_ms: 100
   max_memory_mb: 64
+
+# Integración Realizada: io.agentorquestor.skills.git
+# Referencia: agents/skills/git_autocommit/metadata.yaml
+```yaml
+version: "1.0-alpha"
+namespace: "io.agentorquestor.skills.git"
+name: "git_autocommit_professional"
+capabilities: ["git_analysis", "git_commit", "git_push"]
+constraints:
+  timeout_ms: 15000
+```
 ```
 
 ## Esquema JSON de Validación del Payload (Pydantic v2)
