@@ -10,14 +10,15 @@ import autogen
 from typing import Dict, Any
 from .signatures import CodeRefactorSignature, SecurityAuditSignature
 
-# --- CONFIGURACIÓN DE BACKEND (Speculative Decoding & PyramidKV) ---
-# Nota: En un entorno real, estos parámetros se pasan al motor de inferencia (vLLM/SGLang)
-# Aquí los definimos en la configuración de AutoGen para que los agentes los "conozcan".
+# --- CONFIGURACIÓN DE BACKEND (Local Swarm Engine) ---
+# Esta configuración asume un servidor de inferencia local (vLLM, Ollama o vLLM-OpenAI-API)
+# o una configuración de entorno local para evitar dependencias de terceros como OpenRouter.
 llm_config = {
     "config_list": [
         {
-            "model": "gpt-4-turbo-2024-04-09", # O modelo local como Llama-3-70B
-            "api_key": "NULL", # Se asume configuración vía variables de entorno
+            "model": "deepseek-r1", # O el modelo que sirvas localmente
+            "base_url": "http://localhost:8000/v1", # Endpoint estándar local
+            "api_key": "not-needed-locally",
         }
     ],
     "cache_seed": 42,
@@ -25,7 +26,7 @@ llm_config = {
     "max_tokens": 4096,
     "extra_body": {
         "kv_cache_policy": "PyramidKV",
-        "kv_cache_ratio": 0.12,  # Mantener solo el 12% de la caché KV
+        "kv_cache_ratio": 0.12,
         "speculative_decoding": True
     }
 }
