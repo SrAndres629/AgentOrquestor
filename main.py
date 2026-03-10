@@ -45,7 +45,10 @@ async def main():
             read_stream, write_stream,
             InitializationOptions(
                 server_name='agentOrquestor', server_version='2.6-Unified',
-                capabilities=server.get_capabilities(notification_options=NotificationOptions())
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
+                )
             )
         )
 

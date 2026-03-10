@@ -1,13 +1,14 @@
 import asyncio
 import json
 import sys
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
 
 async def test_server():
     print("[*] Iniciando Handshake MCP con AgentOrquestor...")
     # Corregimos la llamada al SDK
-    async with stdio_client(".venv/bin/python", ["main.py"]) as (read, write):
+    server = StdioServerParameters(command=sys.executable, args=["-B", "main.py"])
+    async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             # 1. Inicialización
             await session.initialize()
@@ -24,7 +25,10 @@ async def test_server():
             result = await session.call_tool("direct_refactor", {"intent": "test de integracion de red"})
             
             print("[+] RESULTADO DEL SERVIDOR:")
-            print(json.dumps(json.loads(result.content[0].text), indent=2))
+            try:
+                print(json.dumps(json.loads(result.content[0].text), indent=2))
+            except Exception:
+                print(result.content[0].text)
             
             if "SWARM_AWAKE" in result.content[0].text or "CACHE_HIT" in result.content[0].text:
                 print("\n[Veredicto] AGENT_ORQUESTOR: 100% FUNCIONAL")
