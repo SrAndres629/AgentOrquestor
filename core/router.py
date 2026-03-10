@@ -1,68 +1,56 @@
 """
-AgentOrquestor - Capa 0: Enrutador Semántico (Semantic Router)
+AgentOrquestor - Capa 0: Enrutador Semántico (Cloud API Edition)
 ==============================================================
-Intercepta tareas repetitivas antes de activar la etapa costosa de LangGraph
-(que despertaría el modelo de validación y draft model en el Swarm).
-
-Opera estrictamente sobre CPU para dejar libre la VRAM (6GB) usando el modelo
-minimizado all-MiniLM-L6-v2, logrando un vector de embedding ligero.
-Si una tarea reciente supera el umbral de similitud semántica, extraemos el 
-parche diff de la DB local (SQLite / GraphRAG) para retorno determinista Inmediato.
+Utiliza OpenRouter/Voyage para embeddings de alta precisión.
+Elimina la carga de CPU/GPU local para optimizar el i9/RTX3060.
 """
 
 import os
 import sqlite3
-from typing import Optional, Dict, Any
+import httpx
+from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
 
-try:
-    from sentence_transformers import SentenceTransformer, util
-except ImportError:
-    SentenceTransformer = None
+# Cargar variables de entorno del archivo .env local
+load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
-# Caché Singleton del modelo de CPU
-_cpu_encoder = None
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-def get_encoder() -> 'SentenceTransformer':
-    """Inicializa under-demand el modelo de embedding para uso de RAM, no VRAM."""
-    global _cpu_encoder
-    if _cpu_encoder is None:
-        if SentenceTransformer is None:
-            raise RuntimeError("La librería 'sentence-transformers' no está instalada.")
-        
-        # Modelo estricto a CPU: 384 dim, ~80MB en RAM.
-        _cpu_encoder = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
-    return _cpu_encoder
+def get_voyage_embedding(text: str) -> List[float]:
+    """
+    Llama a Voyage AI o OpenRouter para obtener el vector semántico.
+    Nota: voyage-code-2 es el estándar de oro para embeddings de código.
+    """
+    # Si no hay API Key, devolvemos un vector nulo para evitar crasheos (Fallback)
+    if "REPLACE_WITH_YOUR_KEY" in OPENROUTER_API_KEY or not OPENROUTER_API_KEY:
+        return [0.0] * 384 # Dimensión del anterior local
 
-
-def _secure_db_path() -> str:
-    """Respeta el confinamiento estricto a la carpeta del proyecto para SQLite."""
-    project_root = os.path.abspath(os.getcwd())
-    db_file = os.path.join(project_root, 'memory', 'graph', 'semantic_cache.db')
-    
-    # Path Traversal Guard de seguridad (Inyección base de manifiesto)
-    if not os.path.abspath(db_file).startswith(project_root):
-        raise SecurityError("Ruta de grafo fuera del límite de confinamiento permitido.")
-    return db_file
-
+    try:
+        # Llamada a OpenRouter (O Voyage AI directo)
+        with httpx.Client() as client:
+            response = client.post(
+                "https://openrouter.ai/api/v1/embeddings",
+                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                json={
+                    "model": "voyageai/voyage-code-2",
+                    "input": text
+                },
+                timeout=10.0
+            )
+            return response.json()["data"][0]["embedding"]
+    except Exception:
+        return [0.0] * 384
 
 def get_semantic_match(query: str, threshold: float = 0.95) -> Optional[Dict[str, Any]]:
     """
-    Busca heurísticamente tareas resueltas en el Data Transformation Graph / GraphRAG.
-    
-    Args:
-        query: Tarea entrante interceptada del MCP
-        threshold: 0.95 estricto para considerarlo re-utilizable (Zero-Shot Match)
-        
-    Returns:
-        Si match > umbral, un diccionario con el 'diff_patch' o 'cached_action'.
-        Ninguno (None) si debe arrancar LangGraph el Swarm AI completo.
+    Busca heurísticamente tareas resueltas en el Data Transformation Graph (Capa 0).
+    Utiliza el motor de embeddings de la nube para precisión quirúrgica.
     """
-    encoder = get_encoder()
-    query_emb = encoder.encode(query, convert_to_tensor=True)
+    query_emb = get_voyage_embedding(query)
     
-    # Aquí simulamos la capa GraphRAG SQLite por propósitos de scaffolding de la caché.
-    # En Q1-2026 esto apuntará al almacén DTG WAL.
-    db_path = _secure_db_path()
+    # Simulación de búsqueda en base de datos local (SQLite)
+    # Aquí es donde el GraphRAG de AgentOrquestor recupera las soluciones pasadas.
+    db_path = os.path.join(os.path.dirname(__file__), "../memory/graph/semantic_cache.db")
     
     if not os.path.exists(db_path):
         return None
@@ -70,19 +58,23 @@ def get_semantic_match(query: str, threshold: float = 0.95) -> Optional[Dict[str
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        
-        # Búsqueda escalar predeterminada (Asumir tabla pre-existente con embs precomputados)
-        # Nota: En prod, esto se reemplazará con libSQL o faiss sqlite VSS.
         cursor.execute("SELECT id, intent_query, diff_patch FROM intent_cache")
         cached_intents = cursor.fetchall()
         
         best_score = 0.0
         best_match = None
         
+        # En una implementación real 2026, esto usaría pgvector o faiss-sqlite
         for cid, intent_query, diff_patch in cached_intents:
-            cached_emb = encoder.encode(intent_query, convert_to_tensor=True)
-            score = util.cos_sim(query_emb, cached_emb).item()
+            # Nota: Esto es ineficiente (re-embed de caché). En prod se guarda el vector.
+            cached_emb = get_voyage_embedding(intent_query)
             
+            # Cálculo de similitud coseno (Simulado)
+            import numpy as np
+            def cos_sim(a, b):
+                return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+            
+            score = cos_sim(query_emb, cached_emb)
             if score > best_score:
                 best_score = score
                 best_match = {"id": cid, "score": score, "diff_patch": diff_patch}
@@ -90,11 +82,9 @@ def get_semantic_match(query: str, threshold: float = 0.95) -> Optional[Dict[str
         if best_match and best_match["score"] >= threshold:
             return best_match
             
-    except sqlite3.OperationalError:
-        # En caso de que el almacén SQLite RAG no esté inicializado
+    except Exception:
         pass
     finally:
-        if 'conn' in locals():
-            conn.close()
+        if "conn" in locals(): conn.close()
             
     return None

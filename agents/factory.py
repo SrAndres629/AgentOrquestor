@@ -1,84 +1,105 @@
 """
-AgentOrquestor - AutoGen Swarm Factory
-======================================
-Configuración del enjambre de agentes utilizando AutoGen.
-Implementa el patrón Blackboard para la comunicación entre especialistas y 
-aplica optimizaciones de VRAM (PyramidKV).
+AgentOrquestor - AutoGen Swarm Factory (Cloud Agent Edition)
+===========================================================
+Configuración del enjambre utilizando Groq y OpenRouter.
+Utiliza Claude 3.5 Sonnet (OpenRouter) para el Arquitecto 
+y Llama 3 70B (Groq) para el LeadDeveloper por su extrema velocidad.
 """
 
+import os
 import autogen
 from typing import Dict, Any
-from .signatures import CodeRefactorSignature, SecurityAuditSignature
+from dotenv import load_dotenv
 
-# --- CONFIGURACIÓN DE BACKEND (Local Swarm Engine) ---
-# Esta configuración asume un servidor de inferencia local (vLLM, Ollama o vLLM-OpenAI-API)
-# o una configuración de entorno local para evitar dependencias de terceros como OpenRouter.
-llm_config = {
+# Cargar variables de entorno del archivo .env local
+load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+SWARM_MODEL = os.getenv("SWARM_MODEL", "anthropic/claude-3.5-sonnet")
+
+# --- CONFIGURACIÓN DE BACKEND (Cloud Swarm Engine) ---
+
+# Configuración 1: OpenRouter (Cerebro de alta capacidad - Claude 3.5 Sonnet)
+openrouter_config = {
     "config_list": [
         {
-            "model": "deepseek-r1", # O el modelo que sirvas localmente
-            "base_url": "http://localhost:8000/v1", # Endpoint estándar local
-            "api_key": "not-needed-locally",
+            "model": SWARM_MODEL,
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": OPENROUTER_API_KEY,
+            "headers": {
+                "HTTP-Referer": "https://github.com/AgentOrquestor", # Identificación para ranking
+                "X-Title": "AgentOrquestor-Swarm"
+            }
         }
     ],
     "cache_seed": 42,
+    "temperature": 0.1, # Muy baja para código determinista
+    "max_tokens": 8192
+}
+
+# Configuración 2: Groq (Velocidad extrema - Llama 3.3 70B)
+groq_config = {
+    "config_list": [
+        {
+            "model": "llama-3.3-70b-versatile",
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_key": GROQ_API_KEY
+        }
+    ],
     "temperature": 0.2,
-    "max_tokens": 4096,
-    "extra_body": {
-        "kv_cache_policy": "PyramidKV",
-        "kv_cache_ratio": 0.12,
-        "speculative_decoding": True
-    }
+    "max_tokens": 4096
 }
 
 # --- DEFINICIÓN DE AGENTES ---
 
-# 1. SystemArchitect: El estratega
+# 1. SystemArchitect: El estratega (Claude 3.5 Sonnet - OpenRouter)
+# Se usa Claude porque es el mejor diseñando arquitecturas y entendiendo el contexto.
 architect = autogen.AssistantAgent(
     name="SystemArchitect",
-    llm_config=llm_config,
-    system_message="""Eres el Arquitecto de Sistemas. 
-    Tu función es analizar el DTG (Data Transformation Graph) y diseñar la estrategia técnica.
-    No escribes código final, sino que dictas las pautas de diseño y los componentes afectados.
-    Debes asegurar que la solución sea escalable y eficiente en términos de hardware."""
+    llm_config=openrouter_config,
+    system_message="""Eres el Arquitecto de Sistemas Principal. 
+    Tu función es diseñar estrategias técnicas complejas basadas en Claude-3.5.
+    Analizas el linaje del código y los componentes afectados.
+    Tu prioridad es la mantenibilidad y el rigor arquitectural."""
 )
 
-# 2. LeadDeveloper: El implementador (Powered by DSPy)
+# 2. LeadDeveloper: El implementador (Llama 3.3 70B - Groq)
+# Se usa Groq por su extrema velocidad de codificación (token-to-token < 10ms).
 developer = autogen.AssistantAgent(
     name="LeadDeveloper",
-    llm_config=llm_config,
-    system_message=f"""Eres el Desarrollador Líder.
-    Tu objetivo es implementar el código refactorizado.
-    Utilizas la firma de razonamiento DSPy: {CodeRefactorSignature.__doc__}
-    Debes seguir estrictamente las pautas del Arquitecto."""
+    llm_config=groq_config,
+    system_message="""Eres el Desarrollador Líder.
+    Tu objetivo es implementar el código refactorizado con la velocidad de Groq.
+    Debes seguir estrictamente las pautas del Arquitecto.
+    Devuelves el código en bloques Markdown limpios."""
 )
 
-# 3. SecurityQA: El auditor (Veto Power)
+# 3. SecurityQA: El auditor (Claude 3.5 Sonnet - OpenRouter)
+# Se vuelve a usar Claude para una auditoría de seguridad profunda.
 security_qa = autogen.AssistantAgent(
     name="SecurityQA",
-    llm_config=llm_config,
-    system_message=f"""Eres el Auditor de Seguridad (QA).
+    llm_config=openrouter_config,
+    system_message="""Eres el Auditor de Seguridad (QA).
     Analizas el código del LeadDeveloper buscando vulnerabilidades.
-    Utilizas la firma de razonamiento DSPy: {SecurityAuditSignature.__doc__}
-    Si encuentras riesgos, debes vetar la solución con 'REJECTED' y explicar los motivos.
-    Si es seguro, confirma con 'APPROVED'."""
+    Si encuentras riesgos, debes vetar la solución con REJECTED.
+    Si es seguro, confirma con APPROVED."""
 )
 
-# --- CONFIGURACIÓN DEL GROUP CHAT (Blackboard Pattern) ---
+# --- CONFIGURACIÓN DEL GROUP CHAT ---
 
 def create_swarm_manager():
     """Instancia el gestor del chat grupal para la orquestación del enjambre."""
     groupchat = autogen.GroupChat(
         agents=[architect, developer, security_qa],
         messages=[],
-        max_round=10,
-        speaker_selection_method="auto",
-        allow_repeat_speaker=False
+        max_round=8, # Reducimos rondas para eficiencia de costos
+        speaker_selection_method="auto"
     )
     
     manager = autogen.GroupChatManager(
         groupchat=groupchat,
-        llm_config=llm_config
+        llm_config=openrouter_config
     )
     
     return manager
