@@ -52,6 +52,23 @@ bus.subscribe("MODEL_ROTATED", on_model_rotated)
 bus.subscribe("SYSTEM_ERROR_DETECTED", on_system_error)
 bus.subscribe("VRAM_THRESHOLD_REACHED", on_vram_threshold_reached)
 
+# --- 1.1 REPLAY DURABLE EVENT QUEUE (Crash Resilience) ---
+
+async def _replay_eventbus_queue_best_effort() -> None:
+    try:
+        replayed = await bus.replay_persisted_events()
+        if replayed:
+            sys.stderr.write(f"🧾 [ORCHESTRATOR] Replayed {replayed} persisted bus events.\n")
+    except Exception:
+        pass
+
+try:
+    _loop = asyncio.get_event_loop()
+    if _loop.is_running():
+        _loop.create_task(_replay_eventbus_queue_best_effort())
+except Exception:
+    pass
+
 # --- 2. NODOS REACTIVOS ---
 
 async def router_node(state: AgentState) -> AgentState:
