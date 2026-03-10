@@ -67,7 +67,7 @@ class ExpertProxyServer:
                     # 3. RAZONAMIENTO AGÉNTICO (Simulado)
                     # En producción 2026, aquí DeepSeek-R1 analizaría la misión contra las herramientas
                     # y ejecutaría la secuencia óptima (Ej: list_files -> read -> write -> push).
-                    print(f"[*] Proxy Experto: Analizando misión contra {len(internal_tools.tools)} herramientas internas.")
+                    sys.stderr.write(f"[*] Proxy Experto: Analizando misión contra {len(internal_tools.tools)} herramientas internas." + \"\n\")
                     
                     # 4. Retorno de Alta Fidelidad
                     return [

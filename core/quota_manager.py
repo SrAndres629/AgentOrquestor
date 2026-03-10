@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import yaml
 import os
@@ -13,7 +14,7 @@ class QuotaManager:
     async def handle_api_error(self, data: dict, current_state_data: dict = None):
         error_msg = data.get("error", "")
         if "429" in error_msg or "rate_limit" in error_msg.lower():
-            print(f"⚠️ [QUOTA] Límite alcanzado en {self.current_tier}. Iniciando Brain Handover...")
+            sys.stderr.write(f"⚠️ [QUOTA] Límite alcanzado en {self.current_tier}. Iniciando Brain Handover..." + \"\n\")
             
             # 1. Destilación Semántica antes de morir (Vanguardia)
             if current_state_data:
@@ -30,16 +31,16 @@ class QuotaManager:
             next_tier = tiers.get(self.current_tier, {}).get("fallback")
 
             if next_tier and next_tier != "hibernate":
-                print(f"🔄 [QUOTA] Traspasando conciencia a: {next_tier}")
+                sys.stderr.write(f"🔄 [QUOTA] Traspasando conciencia a: {next_tier}" + \"\n\")
                 self.current_tier = next_tier
                 await bus.publish("MODEL_ROTATED", data={
                     "new_tier": next_tier,
                     "config": tiers.get(next_tier)
                 })
             elif next_tier == "hibernate":
-                print("💤 [QUOTA] No hay más cuota. Hibernación profunda.")
+                sys.stderr.write("💤 [QUOTA] No hay más cuota. Hibernación profunda." + \"\n\")
                 await bus.publish("SYSTEM_HIBERNATE")
         except Exception as e:
-            print(f"❌ [QUOTA] Error en rotación: {e}")
+            sys.stderr.write(f"❌ [QUOTA] Error en rotación: {e}" + \"\n\")
 
 quota_manager = QuotaManager()

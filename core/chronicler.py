@@ -1,3 +1,4 @@
+import sys
 import os
 import json
 import numpy as np
@@ -34,7 +35,7 @@ class LightweightChronicler:
         }
         self.memory.append(entry)
         self._save()
-        print(f"📖 [CHRONICLER] Memoria episódica guardada: {entry["task"][:30]}...")
+        sys.stderr.write(f"📖 [CHRONICLER] Memoria episódica guardada: {entry["task"][:30]}..." + \"\n\")
 
     def query(self, query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
         """Búsqueda simple por coincidencia de palabras (Sin embeddings pesados en VRAM)."""

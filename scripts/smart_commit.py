@@ -4,65 +4,36 @@ import sys
 
 def run_command(cmd):
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return result.stdout.strip(), result.stderr.strip()
+    return result.stdout.strip(), result.stderr.strip(), result.returncode
 
-def get_git_diff():
-    stdout, _ = run_command("git diff --cached")
-    return stdout
-
-def load_env_token():
-    """Busca la variable github_token en el archivo .env."""
+def main():
+    sys.stderr.write("🚀 [SYNC] Sincronización Directa v3.5\n")
+    # 1. Staging
+    run_command("git add .")
+    
+    # 2. Commit
+    commit_msg = "refactor: structural unif. and smart_commit 3.5"
+    run_command(f"git commit -m \"{commit_msg}\"")
+    
+    # 3. Token & Push
+    token = ""
     env_path = os.path.join(os.getcwd(), ".env")
     if os.path.exists(env_path):
         with open(env_path, "r") as f:
             for line in f:
-                if line.strip().startswith("github_token="):
-                    # Extraer el valor ignorando posibles comillas
+                if "github_token=" in line:
                     token = line.split("=")[1].strip().strip("\"").strip("'")
-                    return token
-    return None
-
-def main():
-    print("🚀 [SMART_COMMIT] Iniciando ciclo de sincronización inteligente con Token...")
-    
-    # 1. Comprobar cambios
-    diff = get_git_diff()
-    if not diff:
-        print("⚠️  No hay cambios en el stage. Usa 'git add' primero.")
-        sys.exit(0)
-
-    # 2. Generación de Mensaje
-    commit_msg = "feat: evolution of AgentOrquestor (v2.3) - Reactive EDA & Self-Healing"
-    if "event_bus" in diff: commit_msg = "feat(core): enhance reactive event bus"
-    elif "registry" in diff: commit_msg = "refactor(agents): update dynamic registry"
-    elif "telemetry" in diff: commit_msg = "feat(telemetry): implement real-time log sentinel"
-
-    # 3. Commit Local
-    stdout, stderr = run_command(f"git commit -m '{commit_msg}'")
-    if stderr and "error" in stderr.lower() and "nothing to commit" not in stderr.lower():
-        print(f"❌ Error en commit: {stderr}")
-    else:
-        print(f"✅ Commit local exitoso: '{commit_msg}'")
-
-    # 4. Push con Token
-    token = load_env_token()
-    repo_url = "https://github.com/SrAndres629/AgentOrquestor.git"
     
     if token:
-        print("🔑 [AUTH] Token detectado. Configurando empuje autenticado...")
-        # Construimos la URL con el token para bypass de login interactivo
+        sys.stderr.write("🔑 [AUTH] Empujando con Token...\n")
         auth_url = f"https://SrAndres629:{token}@github.com/SrAndres629/AgentOrquestor.git"
-        stdout, stderr = run_command(f"git push {auth_url} main")
+        _, stderr, code = run_command(f"git push {auth_url} main")
+        if code == 0:
+            sys.stderr.write("✅ [SUCCESS] Proyecto sincronizado correctamente en GitHub.\n")
+        else:
+            sys.stderr.write(f"❌ [ERROR] Falló el Push: {stderr}\n")
     else:
-        print("⚠️  No se encontró 'github_token' en .env. Usando push estándar...")
-        stdout, stderr = run_command("git push origin main")
-
-    if "Everything up-to-date" in stdout or "Everything up-to-date" in stderr:
-        print("✅ Todo está actualizado.")
-    elif stderr and "error" in stderr.lower():
-        print(f"❌ Error en Push: {stderr}")
-    else:
-        print("🎊 [SUCCESS] Proyecto sincronizado correctamente en GitHub.")
+        run_command("git push origin main")
 
 if __name__ == "__main__":
     main()

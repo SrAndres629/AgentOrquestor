@@ -1,0 +1,4 @@
+name: post_task_validator
+description: Autodiagnóstico de integridad y sintaxis post-misión.
+version: 2.0
+author: Meta_Engineer

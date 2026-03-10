@@ -1,3 +1,4 @@
+import sys
 import asyncio
 from enum import Enum
 from typing import Callable, Dict, List, Any
@@ -22,7 +23,7 @@ class EventDispatcher:
         self._listeners[event_type].append(callback)
 
     async def publish(self, event_type: str, data: Any = None):
-        print(f"[EVENT_BUS] Publishing {event_type}")
+        sys.stderr.write(f"[EVENT_BUS] Publishing {event_type}" + \"\n\")
         if event_type in self._listeners:
             tasks = [callback(data) for callback in self._listeners[event_type]]
             if tasks:

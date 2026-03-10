@@ -1,3 +1,4 @@
+import sys
 """
 AgentOrquestor - Reactive Workflow Graph (v2.6 - .cortex/ Vault)
 ==============================================================
@@ -29,12 +30,12 @@ from sandbox.manager import secure_eval
 
 async def on_model_rotated(data: Dict[str, Any]):
     new_tier = data.get("new_tier")
-    print(f"🔄 [ORCHESTRATOR] Cerebro rotado a: {new_tier}. Adaptando conciencia...")
+    sys.stderr.write(f"🔄 [ORCHESTRATOR] Cerebro rotado a: {new_tier}. Adaptando conciencia..." + \"\n\")
     gc.collect()
 
 async def on_system_error(data: Dict[str, Any]):
     error_msg = data.get("error", "")
-    print(f"[HEALER] Error detectado. Evaluando cuota y diagnóstico...")
+    sys.stderr.write(f"[HEALER] Error detectado. Evaluando cuota y diagnóstico..." + \"\n\")
     # Pasamos el estado al quota_manager para el "Manifiesto de Conciencia"
     await quota_manager.handle_api_error({"error": error_msg})
 
@@ -52,7 +53,7 @@ async def router_node(state: AgentState) -> AgentState:
     past_memory = vault.retrieve_relevant_memory(intent)
     if past_memory:
         state.dtg_context["vault_memory"] = past_memory
-        print(f"🔑 [ROUTER] Memoria recuperada desde la Bóveda .cortex/")
+        sys.stderr.write(f"🔑 [ROUTER] Memoria recuperada desde la Bóveda .cortex/" + \"\n\")
         
     cached_match = get_semantic_match(intent, threshold=0.98)
     if cached_match:

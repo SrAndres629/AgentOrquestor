@@ -1,3 +1,4 @@
+import sys
 import os
 import json
 import time
@@ -34,7 +35,7 @@ class CortexVault:
         with open(path, "w") as f:
             json.dump(manifesto, f, indent=4)
         
-        print(f"🧠 [CORTEX] Manifiesto de Conciencia guardado en {filename}")
+        sys.stderr.write(f"🧠 [CORTEX] Manifiesto de Conciencia guardado en {filename}" + \"\n\")
         return manifesto
 
     def retrieve_relevant_memory(self, query: str) -> List[Dict[str, Any]]:
