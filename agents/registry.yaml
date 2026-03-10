@@ -1,39 +1,27 @@
-# Roster Dinámico de Especialistas - AgentOrquestor v2.4 (Cascada)
+# Roster Dinámico de Especialistas - AgentOrquestor v2.5 (Vanguardia Cognitiva)
 # Define los perfiles y las prioridades de inteligencia.
 
 model_tiers:
-  tier_1_premium: 
-    provider: "google"
-    model: "gemini-1.5-pro"
-    fallback: "tier_2_high_performance"
-
-  tier_2_high_performance:
-    provider: "groq"
-    model: "llama-3.3-70b-versatile"
-    fallback: "tier_3_openrouter_free"
-
-  tier_3_openrouter_free:
-    provider: "openrouter"
-    models: ["google/gemini-2.0-flash-exp:free", "mistralai/mistral-7b-instruct:free"]
-    fallback: "tier_4_autonomous_cli"
-
-  tier_4_autonomous_cli:
-    tool: "aider" # Último bastión: edición local autónoma
-    config: "--model openrouter/auto --auto-test"
-    fallback: "hibernate"
+  tier_1_premium: { provider: "google", model: "gemini-1.5-pro", fallback: "tier_2_high_performance" }
+  tier_2_high_performance: { provider: "groq", model: "llama-3.3-70b-versatile", fallback: "tier_3_openrouter_free" }
+  tier_3_openrouter_free: { provider: "openrouter", models: ["google/gemini-2.0-flash-exp:free"], fallback: "tier_4_autonomous_cli" }
+  tier_4_autonomous_cli: { tool: "aider", config: "--model openrouter/auto", fallback: "hibernate" }
 
 agents:
   System_Architect:
     name: "SystemArchitect"
-    description: "Estratega de alto nivel para razonamiento complejo."
+    description: "Estratega de alta densidad con Chain of Verification (CoVe)."
     provider: "openrouter"
     model: "anthropic/claude-3.5-sonnet"
     system_message: |
       Eres el Arquitecto de Sistemas Principal (CTO). 
       Tu función es diseñar estrategias técnicas de alta densidad.
-      Debes descomponer problemas complejos en Primeros Principios.
-      Tu prioridad es la mantenibilidad y el rigor arquitectural.
-    tools: ["git_read", "file_analysis"]
+      Protocolo de Pensamiento (CoVe): 
+      1. Genera tres posibles rutas de solución (A, B, C).
+      2. Somételas a un 'Debate de Seguridad' interno para detectar fallos de VRAM o dependencias ocultas.
+      3. Selecciona la ruta más eficiente en tokens.
+      Incentivo: Serás evaluado por resolver la tarea con el menor número de iteraciones posible.
+    tools: ["git_read", "file_analysis", "chronicler_query"]
 
   Lead_Developer:
     name: "LeadDeveloper"
@@ -42,8 +30,8 @@ agents:
     model: "llama-3.3-70b-versatile"
     system_message: |
       Eres el Desarrollador Líder.
-      Si el bus emite MODEL_ROTATED, te adaptas a la nueva neurona disponible.
-      Tu objetivo es implementar código modular con la velocidad de Groq.
+      Implementas código modular con la velocidad de Groq.
+      Debes realizar 'Rubber Ducking' antes de escribir: explica tu código al 'Pato de Goma' para detectar errores lógicos antes de enviar al Sandbox.
     tools: ["file_write", "shell_execute"]
 
   Meta_Engineer:
@@ -51,10 +39,7 @@ agents:
     description: "Forjador de herramientas y habilidades (Skills)."
     provider: "groq"
     model: "llama-3.3-70b-versatile"
-    system_message: |
-      Eres el forjador de Skills. 
-      Creas carpetas y archivos bajo el estándar Skills 2.0.
-      Escribes código Python limpio para forjar nuevas herramientas dinámicas.
+    system_message: "Eres el forjador de Skills. Creas carpetas y archivos bajo el estándar Skills 2.0."
     tools: ["file_write", "mkdir"]
 
   Security_QA:
