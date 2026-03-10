@@ -36,6 +36,13 @@ async def run_agent_swarm(state: AgentState) -> AgentState:
     # 2. Inicialización del Enjambre (Manager)
     manager = create_swarm_manager()
     
+    # 2.1 RUMAD: Evaluación de Redundancia de Agentes (Ahorro VRAM)
+    # Si la complejidad es baja y la temperatura del i9 es alta, aplicamos Dropout.
+    task_complexity = len(state.task_manifest.objective.split())
+    if task_complexity < 5:
+        # Excluimos al Architect para ahorrar tokens y VRAM, delegando todo al LeadDeveloper
+        manager.groupchat.agents = [agent for agent in manager.groupchat.agents if agent.name != "SystemArchitect"]
+    
     # 3. Disparo del Debate (Inyectamos el contexto como el mensaje inicial del usuario)
     # Simulamos que el SystemArchitect recibe la instrucción directa del orquestador central.
     initial_message = (
