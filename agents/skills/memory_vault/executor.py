@@ -2,6 +2,7 @@ import json
 import os
 import hashlib
 from typing import Dict, Any
+from core.telemetry import telemetry
 
 class MemoryVaultExecutor:
     """Sincronizador Multimodal de Bóveda (.cortex)."""
@@ -25,11 +26,12 @@ class MemoryVaultExecutor:
                 "code_ref": code[:100]
             }
             
+            os.makedirs(os.path.join(self.cortex_path, "multimodal"), exist_ok=True)
             path = os.path.join(self.cortex_path, "multimodal", f"index_{entry_id}.json")
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(meta, f)
             
-            print(f"✨ [SKILL] Memoria Multimodal Sincronizada: {entry_id}")
+            telemetry.info(f"✨ [SKILL] Memoria Multimodal Sincronizada: {entry_id}")
         return entry_id
 
 executor = MemoryVaultExecutor()

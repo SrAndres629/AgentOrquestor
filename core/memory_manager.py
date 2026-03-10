@@ -2,8 +2,10 @@ import sys
 import os
 import json
 import time
+import uuid
 from typing import Dict, Any, List
 from core.event_bus import bus
+from core.telemetry import telemetry
 
 class CortexVault:
     """
@@ -15,6 +17,9 @@ class CortexVault:
         self.snapshot_path = f"{base_path}/snapshots"
         self.embedding_path = f"{base_path}/embeddings"
         self.multimodal_path = f"{base_path}/multimodal"
+        os.makedirs(self.snapshot_path, exist_ok=True)
+        os.makedirs(self.embedding_path, exist_ok=True)
+        os.makedirs(self.multimodal_path, exist_ok=True)
 
     async def save_consciousness_manifesto(self, state_data: Dict[str, Any]):
         """
@@ -29,18 +34,46 @@ class CortexVault:
             "current_architecture_focus": state_data.get("dtg_context", {}).get("active_file", "root")
         }
         
-        filename = f"manifesto_{int(time.time())}.json"
+        filename = f"manifesto_{int(time.time())}_{uuid.uuid4().hex[:8]}.json"
         path = os.path.join(self.snapshot_path, filename)
         
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(manifesto, f, indent=4)
         
-        sys.stderr.write(f"🧠 [CORTEX] Manifiesto de Conciencia guardado en {filename}" + \"\n\")
+        sys.stderr.write(f"🧠 [CORTEX] Manifiesto de Conciencia guardado en {filename}\n")
+        telemetry.emit_event("CORTEX_MANIFESTO_SAVED", {"filename": filename, "objective": manifesto["mission_objective"]})
         return manifesto
 
     def retrieve_relevant_memory(self, query: str) -> List[Dict[str, Any]]:
         """Recupera fragmentos de memoria técnica para el nuevo modelo."""
-        # Lógica de búsqueda por similitud en .cortex/embeddings/
-        return []
+        query_words = {w for w in query.lower().split() if len(w) >= 3}
+        if not query_words:
+            return []
+
+        try:
+            files = [
+                os.path.join(self.snapshot_path, f)
+                for f in os.listdir(self.snapshot_path)
+                if f.endswith(".json")
+            ]
+        except Exception:
+            return []
+
+        files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        hits: List[Dict[str, Any]] = []
+        for path in files[:50]:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    obj = json.load(f)
+                objective = str(obj.get("mission_objective", "")).lower()
+                words = set(objective.split())
+                if query_words & words:
+                    obj["_path"] = path
+                    hits.append(obj)
+                    if len(hits) >= 3:
+                        break
+            except Exception:
+                continue
+        return hits
 
 vault = CortexVault()

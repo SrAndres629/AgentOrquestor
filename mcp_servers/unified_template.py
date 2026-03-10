@@ -11,6 +11,7 @@ import json
 import dspy
 from mcp.server import Server
 from .signatures import UnifiedMissionSignature
+from core.telemetry import telemetry
 
 class UnifiedMCPServer:
     """
@@ -63,8 +64,8 @@ class UnifiedMCPServer:
             # (Ej: git push, comfyui run, etc.) de forma invisible para el usuario.
             
             # Simulamos ejecución basada en el 'execution_plan' de DSPy
-            print(f"[*] Analizando Misión con Primeros Principios: {reasoning.mental_model_analysis[:50]}...")
-            print(f"[*] Ejecutando Plan de Misión: {reasoning.execution_plan[:50]}...")
+            telemetry.info(f"[*] Analizando Misión con Primeros Principios: {reasoning.mental_model_analysis[:50]}...")
+            telemetry.info(f"[*] Ejecutando Plan de Misión: {reasoning.execution_plan[:50]}...")
 
             return [
                 {

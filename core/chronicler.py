@@ -4,6 +4,7 @@ import json
 import numpy as np
 from typing import List, Dict, Any, Optional
 from core.event_bus import bus
+from core.telemetry import telemetry
 
 class LightweightChronicler:
     """
@@ -35,7 +36,7 @@ class LightweightChronicler:
         }
         self.memory.append(entry)
         self._save()
-        sys.stderr.write(f"📖 [CHRONICLER] Memoria episódica guardada: {entry["task"][:30]}..." + \"\n\")
+        telemetry.info(f"📖 [CHRONICLER] Memoria episódica guardada: {entry['task'][:30]}...")
 
     def query(self, query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
         """Búsqueda simple por coincidencia de palabras (Sin embeddings pesados en VRAM)."""

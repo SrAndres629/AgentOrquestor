@@ -7,8 +7,12 @@ el estado final tras el debate del enjambre.
 """
 
 import json
+import hashlib
+import os
 from typing import Dict, Any, List
 from core.state import AgentState
+from core.event_bus import bus
+from core.hardware import get_gpu_vram_mb
 from .factory import create_swarm_manager, architect, developer, security_qa
 
 async def run_agent_swarm(state: AgentState) -> AgentState:
@@ -20,13 +24,52 @@ async def run_agent_swarm(state: AgentState) -> AgentState:
     # 1. Preparación del contexto (Inyección de Telemetría y Presupuesto)
     telemetry_data = state.hardware_telemetry
     manifest = state.task_manifest
+
+    task_id = hashlib.sha256(str(manifest.objective).encode("utf-8")).hexdigest()[:12]
+
+    used_mb, total_mb = get_gpu_vram_mb()
+    if total_mb > 0:
+        telemetry_data["vram_usage_mb"] = float(used_mb)
+        telemetry_data["vram_total_mb"] = float(total_mb)
+    vram_total = float(telemetry_data.get("vram_total_mb") or total_mb or 0.0)
+    vram_used = float(telemetry_data.get("vram_usage_mb") or used_mb or 0.0)
+    vram_free = max(vram_total - vram_used, 0.0) if vram_total > 0 else 0.0
+
+    threshold_env = os.getenv("VRAM_THRESHOLD_MB", "").strip()
+    if threshold_env:
+        try:
+            threshold_mb = float(threshold_env)
+        except ValueError:
+            threshold_mb = vram_total * 0.90 if vram_total > 0 else 0.0
+    else:
+        threshold_mb = vram_total * 0.90 if vram_total > 0 else 0.0
+
+    if threshold_mb > 0 and vram_used >= threshold_mb:
+        await bus.publish(
+            "VRAM_THRESHOLD_REACHED",
+            data={
+                "vram_usage_mb": vram_used,
+                "threshold_mb": threshold_mb,
+                "state_data": {
+                    "task_manifest": {
+                        "objective": manifest.objective,
+                        "kpis": getattr(manifest, "kpis", None),
+                        "token_budget": getattr(manifest, "token_budget", None),
+                    },
+                    "dtg_context": state.dtg_context,
+                },
+            },
+            task_id=task_id,
+        )
     
     context_payload = {
         "objective": manifest.objective,
         "kpis": manifest.kpis,
         "token_budget": manifest.token_budget,
         "hardware_context": {
-            "vram_free_mb": 6144 - telemetry_data.get("vram_usage_mb", 0),
+            "vram_used_mb": vram_used,
+            "vram_total_mb": vram_total,
+            "vram_free_mb": vram_free,
             "cpu_temp_c": telemetry_data.get("i9_temperature_c", 0),
             "io_latency_ms": telemetry_data.get("io_uring_latency_ms", 0)
         },

@@ -12,7 +12,9 @@ def main():
     run_command("git add .")
     
     # 2. Commit
-    commit_msg = "refactor: structural unif. and smart_commit 3.5"
+    commit_msg = "refactor(core): restore executability + MCP-safe logging"
+    if len(sys.argv) > 1:
+        commit_msg = " ".join(sys.argv[1:]).strip() or commit_msg
     run_command(f"git commit -m \"{commit_msg}\"")
     
     # 3. Token & Push

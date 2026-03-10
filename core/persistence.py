@@ -14,8 +14,7 @@ class PersistenceManager:
             fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return f
         except IOError:
-            sys.stderr.write('⚠️ [PERSISTENCE] Acceso denegado: Otro agente está escribiendo en la Unidad D.
-')
+            sys.stderr.write("⚠️ [PERSISTENCE] Acceso denegado: Otro agente está escribiendo en la Unidad D.\n")
             return None
 
 persistence = PersistenceManager()

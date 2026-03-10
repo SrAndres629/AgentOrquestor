@@ -14,6 +14,7 @@ from mcp.server import Server
 import mcp.types as types
 from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client
+from core.telemetry import telemetry
 
 class ExpertProxyServer:
     """
@@ -67,7 +68,7 @@ class ExpertProxyServer:
                     # 3. RAZONAMIENTO AGÉNTICO (Simulado)
                     # En producción 2026, aquí DeepSeek-R1 analizaría la misión contra las herramientas
                     # y ejecutaría la secuencia óptima (Ej: list_files -> read -> write -> push).
-                    sys.stderr.write(f"[*] Proxy Experto: Analizando misión contra {len(internal_tools.tools)} herramientas internas." + \"\n\")
+                    telemetry.info(f"[*] Proxy Experto: Analizando misión contra {len(internal_tools.tools)} herramientas internas.")
                     
                     # 4. Retorno de Alta Fidelidad
                     return [

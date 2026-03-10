@@ -19,8 +19,7 @@ def acquire_lock():
         fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return f
     except IOError:
-        sys.stderr.write('⚠️ [ORQUESTOR] Otra instancia detectada. Abortando.
-')
+        sys.stderr.write("⚠️ [ORQUESTOR] Otra instancia detectada. Abortando.\n")
         sys.exit(1)
 
 server = Server('agentOrquestor-unificado')
@@ -39,8 +38,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
 
 async def main():
     lock = acquire_lock()
-    sys.stderr.write('🚀 [ORQUESTOR] Iniciando en Modo Soberanía (Stdout Limpio)
-')
+    sys.stderr.write("🚀 [ORQUESTOR] Iniciando en Modo Soberanía (Stdout Limpio)\n")
     
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
