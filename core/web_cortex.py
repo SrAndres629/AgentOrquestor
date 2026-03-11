@@ -26,7 +26,14 @@ class WebCortex:
         cortex_base_path: str = ".cortex",
         strict_api_key: Optional[bool] = None,
     ):
-        self.api_key = api_key if api_key is not None else os.getenv("TAVILY_API_KEY", "").strip()
+        if api_key is None:
+            # Support both conventional env var and user's local naming.
+            api_key = (
+                os.getenv("TAVILY_API_KEY", "").strip()
+                or os.getenv("tavily", "").strip()
+                or os.getenv("TAVILY", "").strip()
+            )
+        self.api_key = api_key.strip() if api_key else ""
         self.client = client or httpx.AsyncClient(timeout=30.0)
         self.cortex_base_path = cortex_base_path
 
@@ -131,4 +138,3 @@ class WebCortex:
 
 
 web_cortex = WebCortex()
-

@@ -20,6 +20,9 @@ class SentinelStatus(BaseModel):
 class AgentState(BaseModel):
     messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
     dtg_context: Dict[str, Any] = Field(default_factory=dict)
+    debate_history: List[Dict[str, str]] = Field(default_factory=list)
+    consensus_score: float = 0.0
+    is_stable: bool = False
     
     # 4. Telemetría Avanzada (Sentinel Mode)
     hardware_telemetry: Dict[str, Any] = Field(

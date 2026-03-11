@@ -105,7 +105,20 @@ async def run_agent_swarm(state: AgentState) -> AgentState:
     # 4. Extracción de Resultados y Actualización de AgentState
     # Buscamos el último mensaje del SecurityQA o del Developer para el parche.
     final_patch = ""
+    last_proponent = ""
+    last_adversary = ""
     for msg in reversed(manager.groupchat.messages):
+        try:
+            name = msg.get("name") or msg.get("role") or ""
+            content = msg.get("content") or ""
+        except Exception:
+            continue
+
+        if not last_adversary and str(name) == "SecurityQA":
+            last_adversary = str(content)
+        if not last_proponent and str(name) == "LeadDeveloper":
+            last_proponent = str(content)
+
         if "APPROVED" in msg["content"] or "refactored_code" in msg["content"]:
             # Aquí aplicaríamos una extracción Regex o lógica DSPy para obtener el código limpio.
             final_patch = msg["content"]
@@ -114,6 +127,12 @@ async def run_agent_swarm(state: AgentState) -> AgentState:
     # 5. Actualización del Estado
     # Simulamos la deducción del parche final
     state.dtg_context["last_swarm_resolution"] = final_patch
+    if last_proponent:
+        state.dtg_context["proponent_report"] = last_proponent
+        await bus.publish("DIALECTIC_PROPONENT", data={"content": last_proponent[:4000]}, task_id=task_id)
+    if last_adversary:
+        state.dtg_context["adversary_audit"] = last_adversary
+        await bus.publish("DIALECTIC_ADVERSARY", data={"content": last_adversary[:4000]}, task_id=task_id)
     
     # Descontamos tokens (Mock de presupuesto)
     state.task_manifest.token_budget -= 500 # Valor estimado del debate

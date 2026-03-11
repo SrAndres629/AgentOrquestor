@@ -26,6 +26,7 @@ from core.router import infer_external_research_query
 from agents.manager import run_agent_swarm
 from sandbox.manager import secure_eval
 from core.web_cortex import web_cortex
+from core.arbitrator import arbitrator
 
 # --- 1. LISTENERS DE VANGUARDIA (.cortex) ---
 
@@ -118,6 +119,30 @@ async def swarm_node(state: AgentState) -> AgentState:
     new_state = await run_agent_swarm(state)
     return new_state
 
+async def debate_node(state: AgentState) -> AgentState:
+    """
+    Dialectic supervisor: Proponent vs Adversary convergence.
+    Does not generate; only measures and updates state.
+    """
+    proponent = str(state.dtg_context.get("proponent_report") or state.dtg_context.get("last_swarm_resolution") or "")
+    adversary = str(state.dtg_context.get("adversary_audit") or "")
+    if not proponent or not adversary:
+        state.consensus_score = 0.0
+        state.is_stable = False
+        return state
+
+    score = arbitrator.calculate_convergence(proponent, adversary)
+    state.consensus_score = float(score)
+    state.is_stable = bool(arbitrator.check_consensus(score))
+
+    state.debate_history.append({"proponent": proponent[:800], "adversary": adversary[:800]})
+    state.dtg_context["consensus_score"] = state.consensus_score
+    state.dtg_context["is_stable"] = state.is_stable
+
+    rounds = int(state.dtg_context.get("debate_rounds") or 0) + 1
+    state.dtg_context["debate_rounds"] = rounds
+    return state
+
 async def sandbox_node(state: AgentState) -> AgentState:
     code = state.dtg_context.get("last_swarm_resolution", "")
     report = await secure_eval(code, state)
@@ -139,6 +164,7 @@ workflow = StateGraph(AgentState)
 workflow.add_node("router", router_node)
 workflow.add_node("research", research_node)
 workflow.add_node("swarm", swarm_node)
+workflow.add_node("debate", debate_node)
 workflow.add_node("sandbox", sandbox_node)
 workflow.set_entry_point("router")
 workflow.add_conditional_edges(
@@ -148,7 +174,11 @@ workflow.add_conditional_edges(
     else ("research" if x.dtg_context.get("next_research_query") else "swarm"),
 )
 workflow.add_edge("research", "swarm")
-workflow.add_edge("swarm", "sandbox")
+workflow.add_edge("swarm", "debate")
+workflow.add_conditional_edges(
+    "debate",
+    lambda x: "sandbox" if x.dtg_context.get("is_stable") or int(x.dtg_context.get("debate_rounds") or 0) >= 3 else "swarm",
+)
 workflow.add_conditional_edges("sandbox", lambda x: "swarm" if x.dtg_context.get("retry_count", 0) < 3 and x.dtg_context.get("sandbox_report", {}).get("overall_status") != "APPROVED" else END)
 
 app = workflow.compile()
