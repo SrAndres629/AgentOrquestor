@@ -1,80 +1,81 @@
-"""
-AgentOrquestor - Perception Engine (Tree-sitter & DTG)
-=====================================================
-Analizador estructural de código. Convierte archivos físicos en un 
-Data Transformation Graph (DTG) matemático mediante tree-sitter.
-Permite al agente "ver" dependencias y flujos sin leer texto plano.
-"""
-
-import os
+import json
 from typing import Dict, Any, List
-from tree_sitter import Language, Parser
+from core.hardware_monitor import HardwareMonitor
+from core.chronicler import chronicler
+from core.telemetry import telemetry
 
-# Asumimos gramáticas pre-compiladas para Python en Q1-2026
-PY_LANGUAGE = Language('core/grammars/python.so', 'python')
+hardware_monitor = HardwareMonitor()
 
-class PerceptionEngine:
+class PerceptionNode:
     """
-    Motor de análisis profundo de código (AST -> DTG).
+    Lóbulo Frontal v5.0 (Evolucionado).
+    Actúa como Estratega de Recursos y Generador de Contratos Cognitivos.
     """
     def __init__(self):
-        self.parser = Parser()
-        self.parser.set_language(PY_LANGUAGE)
-
-    def generate_dtg(self, file_path: str) -> Dict[str, Any]:
-        """
-        Lee un archivo y genera un Grafo de Transformación de Datos.
-        """
-        if not os.path.exists(file_path):
-            return {}
-
-        with open(file_path, "rb") as f:
-            tree = self.parser.parse(f.read())
-            
-        root_node = tree.root_node
-        
-        # Extracción de Nodos (Funciones, Clases, Asignaciones)
-        dtg = {
-            "nodes": [],
-            "edges": [], # Dependencias y flujo de datos
-            "complexity_score": 0
+        self.threshold_vram_low = 2000  # MB
+        self.complexity_map = {
+            "FAST": {"desc": "Heurístico", "token_limit": 1000, "rounds": 2, "doubt": "OPTIMIZACIÓN"},
+            "SLOW": {"desc": "Deductivo", "token_limit": 3000, "rounds": 4, "doubt": "INQUISIDOR"}
         }
+
+    def analyze_situation(self, user_goal: str) -> Dict[str, Any]:
+        """
+        Analiza el hardware y define el Modo de Razonamiento y el Contrato Cognitivo.
+        """
+        hw_stats = hardware_monitor.check_stability()
+        available_vram = hw_stats["vram"]["vram_total"] - hw_stats["vram"]["vram_used"]
         
-        # Recorrido del AST para mapear el DTG
-        cursor = tree.walk()
-        reached_root = False
-        while not reached_root:
-            node_type = cursor.node.type
-            if node_type in ["function_definition", "class_definition"]:
-                dtg["nodes"].append({
-                    "id": cursor.node.id,
-                    "type": node_type,
-                    "name": self._get_node_name(cursor.node),
-                    "range": [cursor.node.start_byte, cursor.node.end_byte]
-                })
-            
-            # Navegación del árbol (DFS)
-            if cursor.goto_first_child():
-                continue
-            if cursor.goto_next_sibling():
-                continue
-            
-            retracing = True
-            while retracing:
-                if not cursor.goto_parent():
-                    retracing = False
-                    reached_root = True
-                if cursor.goto_next_sibling():
-                    retracing = False
+        # 1. Análisis de Precedentes
+        past_lessons = chronicler.get_relevant_lessons(user_goal)
+        has_precedent = len(past_lessons) > 0
 
-        dtg["complexity_score"] = len(dtg["nodes"])
-        return dtg
+        # 2. Selección de Modo (Filtro de Supervivencia)
+        if available_vram < self.threshold_vram_low:
+            mode = "FAST"
+            justification = "VRAM Crítica detectada. Modo Supervivencia activo."
+        elif not has_precedent or any(kw in user_goal.lower() for kw in ["refactor", "optimizar", "core"]):
+            mode = "SLOW"
+            justification = "Complejidad Estructural detectada. Requiere pensamiento lento."
+        else:
+            mode = "FAST"
+            justification = "Patrón conocido detectado. Optimizando para velocidad."
 
-    def _get_node_name(self, node) -> str:
-        """Extrae el identificador del nodo (ej: nombre de la función)."""
-        for child in node.children:
-            if child.type == "identifier":
-                return child.text.decode('utf-8')
-        return "anonymous"
+        # 3. Generación del Contrato Cognitivo (Framing)
+        contract = self.generate_cognitive_contract(mode, available_vram)
 
-perception = PerceptionEngine()
+        perception_snapshot = {
+            "mode": mode,
+            "justification": justification,
+            "contract": contract,
+            "variables_criticas": self._define_critical_variables(user_goal),
+            "vram_context": available_vram
+        }
+
+        telemetry.info(f"🧠 Percepción: Contrato {mode} generado. Presupuesto: {contract['max_rounds_budget']} rondas.")
+        return perception_snapshot
+
+    def generate_cognitive_contract(self, mode: str, vram: float) -> Dict[str, Any]:
+        """
+        Define los límites de gasto metabólico y agresividad dialéctica.
+        """
+        config = self.complexity_map[mode]
+        
+        # Ajuste dinámico de rondas según VRAM real
+        rounds_budget = config["rounds"]
+        if vram < 1500: rounds_budget = 1 # Veto absoluto a debates largos
+        
+        return {
+            "max_tokens_allowed": config["token_limit"],
+            "max_rounds_budget": rounds_budget,
+            "doubt_level": config["doubt"],
+            "metabolic_priority": "EFFICIENCY" if vram < 2500 else "PERFORMANCE"
+        }
+
+    def _define_critical_variables(self, goal: str) -> List[str]:
+        """Encuadre: Identifica sobre qué debe enfocarse el agente."""
+        variables = ["Estabilidad VRAM", "Consistencia del Event Bus"]
+        if "chronicler" in goal.lower(): variables.append("Integridad de Memoria")
+        if "sandbox" in goal.lower(): variables.append("Seguridad de Ejecución")
+        return variables
+
+perception = PerceptionNode()
