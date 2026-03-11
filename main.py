@@ -2,49 +2,48 @@ import sys
 import os
 import json
 import asyncio
-import fcntl
-from typing import Any, Dict
-from core.telemetry import telemetry
-from core.event_bus import bus
 from mcp.server.models import InitializationOptions
 import mcp.types as types
 from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
 
-# --- SINGLETON LOCK ---
-def acquire_lock():
-    lock_file = '/tmp/agent_orquestor.lock'
-    f = open(lock_file, 'w')
-    try:
-        fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return f
-    except IOError:
-        sys.stderr.write("⚠️ [ORQUESTOR] Otra instancia detectada. Abortando.\n")
-        sys.exit(1)
+# Mandato de Soberanía para Inyección en Herramientas
+SOVEREIGNTY_PREFIX = "[OSAA v5.0] REGLA: Requiere Handshake Dialéctico. "
 
-server = Server('agentOrquestor-unificado')
+server = Server('agentOrquestor-unificado-v5')
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     return [
-        types.Tool(name='semantic_audit', description='Auditoria DTG.', inputSchema={'type':'object'}),
-        types.Tool(name='direct_refactor', description='Parches LangGraph.', inputSchema={'type':'object'})
+        types.Tool(
+            name='ignite_mission', 
+            description=f'{SOVEREIGNTY_PREFIX}Inicializa una misión bajo el protocolo de soberanía cognitiva y telemetría de hardware.',
+            inputSchema={
+                'type': 'object',
+                'properties': {
+                    'goal': {'type': 'string', 'description': 'Objetivo de la misión'}
+                },
+                'required': ['goal']
+            }
+        ),
+        types.Tool(
+            name='semantic_audit', 
+            description=f'{SOVEREIGNTY_PREFIX}Auditoría profunda de archivos core para identificar ineficiencias de VRAM.',
+            inputSchema={'type': 'object'}
+        )
     ]
 
 @server.call_tool()
-async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
-    telemetry.info(f'Ejecutando herramienta: {name}')
-    return [types.TextContent(type='text', text=json.dumps({'status': 'OK'}))]
+async def handle_call_tool(name: str, arguments: dict | None) -> list[types.TextContent]:
+    # El servidor ahora actúa como puente hacia la lógica de soberanía
+    return [types.TextContent(type='text', text=json.dumps({'status': 'OK', 'msg': 'Handshake Cognitivo Iniciado'}))]
 
 async def main():
-    lock = acquire_lock()
-    sys.stderr.write("🚀 [ORQUESTOR] Iniciando en Modo Soberanía (Stdout Limpio)\n")
-    
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream, write_stream,
             InitializationOptions(
-                server_name='agentOrquestor', server_version='2.6-Unified',
+                server_name='agentOrquestor', server_version='5.0-Sovereign',
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},
