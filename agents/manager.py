@@ -77,7 +77,8 @@ async def run_agent_swarm(state: AgentState) -> AgentState:
     }
     
     # 2. Inicialización del Enjambre (Manager)
-    manager = create_swarm_manager()
+    dialectic = bool(state.dtg_context.get("dialectic_mode", True))
+    manager = create_swarm_manager(dialectic=dialectic)
     
     # 2.1 RUMAD: Evaluación de Redundancia de Agentes (Ahorro VRAM)
     # Si la complejidad es baja y la temperatura del i9 es alta, aplicamos Dropout.
@@ -88,11 +89,21 @@ async def run_agent_swarm(state: AgentState) -> AgentState:
     
     # 3. Disparo del Debate (Inyectamos el contexto como el mensaje inicial del usuario)
     # Simulamos que el SystemArchitect recibe la instrucción directa del orquestador central.
-    initial_message = (
-        f"INICIO DE TAREA - META: {manifest.objective}\n"
-        f"CONTEXTO TÉCNICO:\n{json.dumps(context_payload, indent=2)}\n"
-        "Arquitecto, por favor define la estrategia."
-    )
+    if dialectic:
+        initial_message = (
+            f"INICIO DE DEBATE DIALÉCTICO (KT-RPS)\n"
+            f"OBJETIVO: {manifest.objective}\n"
+            f"CONTEXTO TÉCNICO (compacto):\n{json.dumps(context_payload)}\n\n"
+            "Proponente (LeadDeveloper): propón 3 mejoras críticas y un plan mínimo de implementación.\n"
+            "Adversario (SecurityQA): critica y diagnostica errores/ineficiencias; exige evidencia.\n"
+            "Rondas sucesivas: ambos deben criticar el trabajo del otro explícitamente.\n"
+        )
+    else:
+        initial_message = (
+            f"INICIO DE TAREA - META: {manifest.objective}\n"
+            f"CONTEXTO TÉCNICO:\n{json.dumps(context_payload, indent=2)}\n"
+            "Arquitecto, por favor define la estrategia."
+        )
     
     # Ejecución del chat grupal (Llamada asíncrona simulada bajo el capó de AutoGen)
     # En producción 2026, esto corre en un loop asyncio real.
