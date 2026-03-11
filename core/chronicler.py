@@ -1,58 +1,58 @@
-import sys
-import os
 import json
-import numpy as np
-from typing import List, Dict, Any, Optional
-from core.event_bus import bus
+import os
+from datetime import datetime
+from typing import Dict, Any, List
 from core.telemetry import telemetry
 
-class LightweightChronicler:
+class Chronicler:
     """
-    El Hipocampo: Memoria Semántica de Bajo Consumo (Pure NumPy).
-    Evita cargar bases de datos pesadas en RAM/VRAM.
+    Sistema de Memoria Episódica v4.0.
+    Almacena lecciones aprendidas de debates y ejecuciones del Sandbox.
     """
-    def __init__(self, db_path="memory/graph/chronicler_vdb.json"):
-        self.db_path = db_path
-        self.memory = []
-        self._load()
+    def __init__(self, storage_path: str = ".cortex/knowledge/lessons.jsonl"):
+        self.storage_path = storage_path
+        os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
 
-    def _load(self):
-        if os.path.exists(self.db_path):
-            with open(self.db_path, "r") as f:
-                self.memory = json.load(f)
-
-    def _save(self):
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        with open(self.db_path, "w") as f:
-            json.dump(self.memory, f)
-
-    async def log_success(self, data: Dict[str, Any]):
-        """Registra un par [Problema + Error] -> [Solución]."""
-        entry = {
-            "task": data.get("task", ""),
-            "error": data.get("error", "None"),
-            "solution": data.get("solution", ""),
-            "timestamp": "2026-03-10"
+    def record_lesson(self, mission_id: str, goal: str, outcome: Dict[str, Any]):
+        """
+        Guarda un registro de lo aprendido.
+        """
+        lesson = {
+            "timestamp": datetime.now().isoformat(),
+            "mission_id": mission_id,
+            "goal": goal,
+            "success": outcome.get("status") == "SUCCESS",
+            "error_log": outcome.get("stderr", ""),
+            "fix_applied": outcome.get("status") == "SUCCESS"
         }
-        self.memory.append(entry)
-        self._save()
-        telemetry.info(f"📖 [CHRONICLER] Memoria episódica guardada: {entry['task'][:30]}...")
-
-    def query(self, query_text: str, top_k: int = 2) -> List[Dict[str, Any]]:
-        """Búsqueda simple por coincidencia de palabras (Sin embeddings pesados en VRAM)."""
-        # En una versión avanzada, usaríamos un modelo de embedding en el i9 (CPU)
-        results = []
-        query_words = set(query_text.lower().split())
-        for entry in self.memory:
-            entry_words = set(entry["task"].lower().split()) | set(entry["error"].lower().split())
-            score = len(query_words & entry_words)
-            if score > 0:
-                results.append((score, entry))
         
-        results.sort(key=lambda x: x[0], reverse=True)
-        return [r[1] for r in results[:top_k]]
+        try:
+            with open(self.storage_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(lesson) + "\n")
+            telemetry.info(f"📖 Chronicler: Nueva lección archivada para '{goal[:30]}...'")
+        except Exception as e:
+            telemetry.error(f"❌ Chronicler: Error al persistir lección: {e}")
 
-chronicler = LightweightChronicler()
+    def get_relevant_lessons(self, current_goal: str) -> List[Dict[str, Any]]:
+        """
+        Búsqueda simple (keyword-based) de lecciones previas.
+        """
+        if not os.path.exists(self.storage_path):
+            return []
 
-# Suscripción al bus para aprendizaje automático
-bus.subscribe("CODE_IMPLEMENTED", chronicler.log_success)
+        lessons = []
+        keywords = set(current_goal.lower().split())
+        
+        try:
+            with open(self.storage_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    lesson = json.loads(line)
+                    lesson_goal = lesson["goal"].lower()
+                    if any(kw in lesson_goal for kw in keywords):
+                        lessons.append(lesson)
+        except Exception:
+            return []
+        
+        return lessons[:3]
+
+chronicler = Chronicler()

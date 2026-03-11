@@ -1,131 +1,83 @@
-import json
 import os
-from dataclasses import dataclass
-from typing import Optional
+import time
+from rich.console import Console
+from rich.layout import Layout
+from rich.panel import Panel
+from rich.live import Live
+from rich.table import Table
+from rich.text import Text
+from core.hardware_monitor import HardwareMonitor
 
+# Instancia global para telemetría
+hardware_monitor = HardwareMonitor()
+console = Console()
 
-@dataclass
-class _Snapshot:
-    proponent: str = ""
-    adversary: str = ""
-    vram_line: str = ""
-    bus_tail: str = ""
-
-
-def _tail_lines(path: str, n: int = 200) -> list[str]:
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            chunk = 8192
-            data = b""
-            pos = size
-            while pos > 0 and data.count(b"\n") < n + 1:
-                pos = max(0, pos - chunk)
-                f.seek(pos)
-                data = f.read(size - pos) + data
-                size = pos
-        lines = data.decode("utf-8", errors="ignore").splitlines()
-        return lines[-n:]
-    except Exception:
-        return []
-
-
-def _extract_latest(snapshot: _Snapshot) -> _Snapshot:
-    bus_path = os.getenv("EVENTBUS_QUEUE_PATH", "").strip() or os.path.join(".cortex", "bus_buffer.jsonl")
-    tel_path = os.path.join(".cortex", "logs", "telemetry.jsonl")
-
-    bus_lines = _tail_lines(bus_path, n=300)
-    pro = ""
-    adv = ""
-    tail_events = []
-    for line in reversed(bus_lines):
-        try:
-            obj = json.loads(line)
-            et = obj.get("event_type")
-            ev = obj.get("event") if isinstance(obj.get("event"), dict) else {}
-            if not pro and et == "DIALECTIC_PROPONENT":
-                pro = str(ev.get("content") or "")
-            if not adv and et == "DIALECTIC_ADVERSARY":
-                adv = str(ev.get("content") or "")
-            if et:
-                tail_events.append(str(et))
-            if pro and adv and len(tail_events) >= 30:
-                break
-        except Exception:
-            continue
-
-    tel_lines = _tail_lines(tel_path, n=200)
-    vram_line = ""
-    for line in reversed(tel_lines):
-        if "\"event\": \"STRESS_VRAM\"" in line or "\"event\":\"STRESS_VRAM\"" in line or "VRAM" in line:
-            vram_line = line.strip()[:180]
-            break
-
-    snapshot.proponent = pro or snapshot.proponent
-    snapshot.adversary = adv or snapshot.adversary
-    snapshot.vram_line = vram_line or snapshot.vram_line
-    snapshot.bus_tail = " | ".join(reversed(tail_events[:12]))
-    return snapshot
-
-
-def run_war_room() -> None:
+class WarRoom:
     """
-    Textual-based War Room (2-panel dialectic + bus/vram tail).
-    This module is optional; it only runs if `textual` is installed.
+    Interfaz Táctica OSAA v4.0.
+    Visualización en tiempo real del metabolismo y debate del enjambre.
     """
-    try:
-        from textual.app import App, ComposeResult
-        from textual.containers import Horizontal, Vertical
-        from textual.widgets import Footer, Header, Static
-    except Exception as e:
-        raise SystemExit(
-            "Missing dependency: textual.\n"
-            "Install in your venv and run again.\n"
-            f"Import error: {e}"
+    def __init__(self, mission_id: str):
+        self.mission_id = mission_id
+        self.start_time = time.time()
+
+    def generate_layout(self) -> Layout:
+        layout = Layout()
+        layout.split_column(
+            Layout(name="header", size=3),
+            Layout(name="main", ratio=1),
+            Layout(name="footer", size=3)
         )
+        layout["main"].split_row(
+            Layout(name="side", size=40),
+            Layout(name="body", ratio=1)
+        )
+        return layout
 
-    class WarRoom(App):
-        CSS = """
-        Screen { layout: vertical; }
-        #top { height: 1fr; }
-        #bottom { height: 6; }
-        .panel { border: round $accent; padding: 1; }
-        """
+    def get_telemetry_panel(self) -> Panel:
+        stats = hardware_monitor.check_stability()
+        vram = stats["vram"]
+        sys = stats["system"]
+        
+        table = Table.grid(expand=True)
+        table.add_row("GPU Temp:", f"[bold red]{vram['gpu_temp']}°C[/]")
+        table.add_row("VRAM Used:", f"[bold yellow]{vram['vram_used']} MB[/]")
+        table.add_row("CPU Load:", f"[bold blue]{sys['cpu_percent']}%[/]")
+        table.add_row("RAM Used:", f"{sys['ram_used_gb']} GB")
+        
+        status_color = "green" if stats["status"] == "STABLE" else "red"
+        return Panel(table, title=f"[{status_color}]SENTINEL STATUS[/]", border_style=status_color)
 
-        def __init__(self) -> None:
-            super().__init__()
-            self.snapshot = _Snapshot()
+    def get_debate_panel(self, pro_text: str = "Esperando tesis...", adv_text: str = "Esperando auditoría...") -> Panel:
+        content = Text()
+        content.append("📜 PROPONENTE (LEAD DEV):\n", style="bold green")
+        content.append(f"{pro_text[:300]}...\n\n")
+        content.append("🛡️ ADVERSARIO (SECURITY QA):\n", style="bold red")
+        content.append(f"{adv_text[:300]}...")
+        
+        return Panel(content, title="DIALECTIC FLOW")
 
-        def compose(self) -> ComposeResult:
-            yield Header()
-            with Horizontal(id="top"):
-                with Vertical(classes="panel"):
-                    yield Static("Proponente (Lead Dev)", id="title_left")
-                    yield Static("", id="proponent")
-                with Vertical(classes="panel"):
-                    yield Static("Adversario (Security/QA)", id="title_right")
-                    yield Static("", id="adversary")
-            with Vertical(id="bottom", classes="panel"):
-                yield Static("EventBus tail", id="bus_tail")
-                yield Static("VRAM", id="vram")
-            yield Footer()
-
-        def on_mount(self) -> None:
-            self.set_interval(0.5, self._tick)
-
-        def _tick(self) -> None:
-            self.snapshot = _extract_latest(self.snapshot)
-            self.query_one("#proponent", Static).update(self.snapshot.proponent[-4000:] or "(waiting...)")
-            self.query_one("#adversary", Static).update(self.snapshot.adversary[-4000:] or "(waiting...)")
-            self.query_one("#bus_tail", Static).update(self.snapshot.bus_tail or "(no events yet)")
-            self.query_one("#vram", Static).update(self.snapshot.vram_line or "(no vram yet)")
-
-    WarRoom().run()
-
-
-if __name__ == "__main__":
-    run_war_room()
-
+    def run(self, state_callback):
+        """Loop de renderizado en vivo."""
+        layout = self.generate_layout()
+        
+        with Live(layout, refresh_per_second=4, screen=True):
+            while True:
+                # Aquí recuperaríamos el estado real del AgentState
+                state = state_callback()
+                
+                # Actualizar Header
+                layout["header"].update(Panel(f"🚀 OSAA v4.0 - MISSION ID: {self.mission_id} | Uptime: {int(time.time() - self.start_time)}s", style="bold magenta"))
+                
+                # Actualizar Paneles
+                layout["side"].update(self.get_telemetry_panel())
+                layout["body"].update(self.get_debate_panel(
+                    state.get("proponent_report", "Iniciando..."),
+                    state.get("adversary_audit", "Iniciando...")
+                ))
+                
+                # Actualizar Footer con el Score del Árbitro
+                score = state.get("consensus_score", 0.0)
+                layout["footer"].update(Panel(f"⚖️ CONVERGENCE SCORE: [bold cyan]{score:.4f}[/] | ROUND: {state.get('debate_rounds', 0)}", border_style="cyan"))
+                
+                time.sleep(0.5)
