@@ -2,11 +2,12 @@ import sys
 import asyncio
 import re
 import difflib
+import os
+from types import SimpleNamespace
 from typing import List, Dict, Any
 from core.event_bus import bus
 from core.memory_manager import vault
 from core.telemetry import telemetry
-from langchain_core.messages import AIMessage
 
 class AdvancedContextShredder:
     def __init__(self, token_threshold=3000):
@@ -81,7 +82,7 @@ class AdvancedContextShredder:
                     repeats = drift_store[best_norm]
                     if repeats >= 3:
                         lesson = self._extract_lesson(content)
-                        new_messages.append(AIMessage(content=lesson))
+                        new_messages.append(SimpleNamespace(type="ai", content=lesson))
                         pruned_count += 1
                         tokens_saved_est += max(int((len(content) - len(lesson)) / 4), 0)
                         telemetry.emit_event(
@@ -117,7 +118,8 @@ class AdvancedContextShredder:
                 total_chars += len(str(content))
         
         if total_chars / 4 > self.token_threshold:
-            sys.stderr.write(f"✂️ [SHREDDER] Alerta de Contexto: {int(total_chars/4)} tokens.\n")
+            if os.getenv("SHREDDER_STDERR", "0") == "1":
+                sys.stderr.write(f"✂️ [SHREDDER] Alerta de Contexto: {int(total_chars/4)} tokens.\n")
             task_manifest = getattr(state, "task_manifest", None)
             task_obj = getattr(task_manifest, "objective", None) if task_manifest else None
             if not task_obj and isinstance(state, dict):
@@ -125,7 +127,8 @@ class AdvancedContextShredder:
             task_obj = task_obj or "Tarea desconocida"
             
             await bus.publish("CONTEXT_SHREDDED", data={"original_tokens": int(total_chars / 4)})
-            sys.stderr.write("✨ [SHREDDER] Contexto destilado para RTX 3060.\n")
+            if os.getenv("SHREDDER_STDERR", "0") == "1":
+                sys.stderr.write("✨ [SHREDDER] Contexto destilado para RTX 3060.\n")
             return True
         return False
 

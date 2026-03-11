@@ -9,7 +9,10 @@ class UnifiedTelemetry:
     def __init__(self):
         self.logger = logging.getLogger('AgentOrquestor')
         self.logger.propagate = False
-        if not self.logger.handlers:
+        # stderr logging can become an I/O bottleneck under swarm stress.
+        # Keep JSONL telemetry as the source of truth; gate stderr via env.
+        stderr_enabled = os.getenv("TELEMETRY_STDERR", "1").strip() == "1"
+        if stderr_enabled and not self.logger.handlers:
             handler = logging.StreamHandler(sys.stderr)
             formatter = logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s')
             handler.setFormatter(formatter)

@@ -6,11 +6,12 @@ import sys
 import time
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, HumanMessage
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from core.event_bus import bus
 from core.shredder import shredder
-from core.state import AgentState
 from core.telemetry import telemetry
 
 
@@ -28,19 +29,29 @@ async def _simulate_trading_mission(idx: int) -> None:
     correlation_id = f"{task_id}:{idx}"
 
     manifest = SimpleNamespace(objective=objective, kpis={"pnl": "mock"}, token_budget=50_000)
+    filler = (
+        "RISK: latency spikes; slippage; regime shift. "
+        "CHECK: orderbook imbalance; volatility clustering; spread mean. "
+        "ERROR: if no new evidence, do not restate the same hypothesis. "
+    )
     repeated_hypothesis = (
-        "HYPOTHESIS: Spread widening implies mean reversion entry. "
-        "EVIDENCE: synthetic. ACTION: wait for confirmation. "
-        "LESSON: avoid repeating identical hypothesis without new evidence."
+        "HYPOTHESIS: Spread widening implies mean reversion entry.\n"
+        + ("DETAIL: " + filler) * 40
+        + "\nEVIDENCE: synthetic.\nACTION: wait for confirmation.\n"
+        + "LESSON: avoid repeating identical hypothesis without new evidence."
     )
     # Force redundancy patterns for pruning logic (post-refactor).
     messages = [
-        HumanMessage(content=f"Objective: {objective}"),
-        AIMessage(content=repeated_hypothesis),
-        AIMessage(content=repeated_hypothesis),
-        AIMessage(content=repeated_hypothesis),
+        SimpleNamespace(type="human", content=f"Objective: {objective}"),
+        SimpleNamespace(type="ai", content=repeated_hypothesis),
+        SimpleNamespace(type="ai", content=repeated_hypothesis),
+        SimpleNamespace(type="ai", content=repeated_hypothesis),
     ]
-    state = AgentState(task_manifest=manifest, messages=messages)
+    state = {
+        "task_manifest": {"objective": manifest.objective, "kpis": manifest.kpis, "token_budget": manifest.token_budget},
+        "dtg_context": {},
+        "messages": messages,
+    }
 
     await bus.publish("TASK_RECEIVED", data={"objective": objective}, task_id=task_id, correlation_id=correlation_id)
     telemetry.emit_event("STRESS_TASK_STARTED", {"objective": objective, "task_id": task_id}, correlation_id=correlation_id)
@@ -86,6 +97,8 @@ async def _emit_system_pressure_events() -> None:
 
 async def main() -> int:
     _silence_stdout()
+    os.environ.setdefault("EVENTBUS_STDERR", "0")
+    os.environ.setdefault("TELEMETRY_STDERR", "0")
     random.seed(1337)
 
     t0 = time.time()

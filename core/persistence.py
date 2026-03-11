@@ -7,9 +7,15 @@ class PersistenceManager:
         self.db_path = db_path
         self.lock_file = db_path + '.lock'
 
-    def acquire_db_lock(self):
-        """Bloqueo atómico para asegurar Singleton de acceso a DB."""
-        f = open(self.lock_file, 'w')
+    def acquire_db_lock(self, task_id: str | None = None):
+        """
+        Bloqueo atómico para acceso a DB.
+        Soporta sharding del lock por task_id para reducir contención bajo swarm.
+        """
+        lock_path = self.lock_file
+        if task_id:
+            lock_path = f"{self.db_path}.{task_id}.lock"
+        f = open(lock_path, 'w')
         try:
             fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return f
