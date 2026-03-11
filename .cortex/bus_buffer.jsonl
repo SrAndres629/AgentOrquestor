@@ -2141,3 +2141,4 @@
 {"seq": 2122, "ts": 1773186310.6497278, "event_type": "PERF_EVENT", "event": {"p": 1, "_meta": {"task_id": "perf", "correlation_id": "999", "ts": 1773186310.6497257}}}
 {"seq": 2123, "ts": 1773186310.6711144, "event_type": "EVENTBUS_THROUGHPUT_OK", "event": {"events": 1000, "elapsed_s": 0.1194, "events_per_s": 8372.44, "target_eps": 500.0, "_meta": {"task_id": "unknown", "correlation_id": "unknown", "ts": 1773186310.6711063}}}
 {"seq": 2124, "ts": 1773186310.672134, "event_type": "SYSTEM_VALIDATED", "event": {"status": "CLEAN", "_meta": {"task_id": "unknown", "correlation_id": "unknown", "ts": 1773186310.6721277}}}
+{"seq": 2125, "ts": 1773189264.418868, "event_type": "WEB_RESEARCH_COMPLETED", "event": {"query": "hello", "sources": 2, "_meta": {"task_id": "t1", "correlation_id": "t1", "ts": 1773189264.4188526}}}

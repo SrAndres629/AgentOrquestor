@@ -16,6 +16,47 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
+def infer_external_research_query(objective: str) -> Optional[str]:
+    """
+    Heurística ligera: detecta cuando una tarea probablemente requiere inteligencia externa.
+    Evita bloquear el hilo principal; solo sugiere una query para el Web-Cortex.
+    """
+    if not objective:
+        return None
+
+    if os.getenv("FORCE_WEB_RESEARCH", "").strip() == "1":
+        return objective
+
+    s = objective.lower()
+    triggers = (
+        "latest",
+        "most recent",
+        "today",
+        "current",
+        "precio",
+        "price",
+        "cotización",
+        "rate",
+        "exchange",
+        "version",
+        "release",
+        "changelog",
+        "documentation",
+        "docs",
+        "api reference",
+        "cve",
+        "vulnerability",
+        "security advisory",
+        "compatible with",
+        "pip install",
+        "npm install",
+        "cargo add",
+        "apt install",
+    )
+    if any(t in s for t in triggers):
+        return objective
+    return None
+
 def get_voyage_embedding(text: str) -> List[float]:
     """
     Llama a Voyage AI o OpenRouter para obtener el vector semántico.

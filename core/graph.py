@@ -22,8 +22,10 @@ from core.memory_manager import vault
 from core.shredder import shredder
 
 from core.router import get_semantic_match
+from core.router import infer_external_research_query
 from agents.manager import run_agent_swarm
 from sandbox.manager import secure_eval
+from core.web_cortex import web_cortex
 
 # --- 1. LISTENERS DE VANGUARDIA (.cortex) ---
 
@@ -86,7 +88,28 @@ async def router_node(state: AgentState) -> AgentState:
     if cached_match:
         state.dtg_context["cache_hit"] = True
         state.dtg_context["last_swarm_resolution"] = cached_match["diff_patch"]
+
+    # Web-Cortex trigger (External Intelligence) — non-blocking suggestion
+    q = infer_external_research_query(intent)
+    if q and not state.dtg_context.get("cache_hit"):
+        state.dtg_context["next_research_query"] = q
     
+    return state
+
+async def research_node(state: AgentState) -> AgentState:
+    query = state.dtg_context.get("next_research_query")
+    if not query:
+        return state
+    task_id = _task_id_from_objective(state.task_manifest.objective)
+    try:
+        research_data = await web_cortex.research(query, task_id=task_id)
+        state.dtg_context["web_hit"] = True
+        state.dtg_context["web_context"] = research_data
+    except Exception as e:
+        state.dtg_context["web_hit"] = False
+        state.dtg_context["web_error"] = str(e)
+    finally:
+        state.dtg_context.pop("next_research_query", None)
     return state
 
 async def swarm_node(state: AgentState) -> AgentState:
@@ -114,10 +137,17 @@ async def sandbox_node(state: AgentState) -> AgentState:
 
 workflow = StateGraph(AgentState)
 workflow.add_node("router", router_node)
+workflow.add_node("research", research_node)
 workflow.add_node("swarm", swarm_node)
 workflow.add_node("sandbox", sandbox_node)
 workflow.set_entry_point("router")
-workflow.add_conditional_edges("router", lambda x: "sandbox" if x.dtg_context.get("cache_hit") else "swarm")
+workflow.add_conditional_edges(
+    "router",
+    lambda x: "sandbox"
+    if x.dtg_context.get("cache_hit")
+    else ("research" if x.dtg_context.get("next_research_query") else "swarm"),
+)
+workflow.add_edge("research", "swarm")
 workflow.add_edge("swarm", "sandbox")
 workflow.add_conditional_edges("sandbox", lambda x: "swarm" if x.dtg_context.get("retry_count", 0) < 3 and x.dtg_context.get("sandbox_report", {}).get("overall_status") != "APPROVED" else END)
 

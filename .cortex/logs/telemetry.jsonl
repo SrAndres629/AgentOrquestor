@@ -163,3 +163,5 @@
 {"ts": 1773186304.7511165, "event": "STRESS_VRAM", "correlation_id": "vram:2", "data": {"used_mb": 5950, "threshold_mb": 5700}}
 {"ts": 1773186304.762166, "event": "STRESS_SYSTEM_ERROR", "correlation_id": "system:error:0", "data": {"error": "synthetic:OOM"}}
 {"ts": 1773186304.762323, "event": "STRESS_RUN_COMPLETE", "correlation_id": "stress:run", "data": {"elapsed_s": 0.0467}}
+{"ts": 1773189264.4178507, "event": "WEB_RESEARCH_STARTED", "correlation_id": "t1", "data": {"query": "hello", "task_id": "t1"}}
+{"ts": 1773189264.4191449, "event": "WEB_RESEARCH_COMPLETED", "correlation_id": "t1", "data": {"query": "hello", "task_id": "t1", "sources": 2}}
