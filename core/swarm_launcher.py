@@ -702,6 +702,16 @@ class SwarmLauncher:
         for iteration in range(self.max_iterations):
             telemetry.info(f"📡 === ITERACIÓN {iteration + 1}/{self.max_iterations} ===")
 
+            # --- Hot Reload: Construir/Refrescar topología en cada iteración ---
+            topology = build_topology_from_registry(goal, mode)
+            topology.max_iterations = self.max_iterations
+            mission_dir = MISSIONS_DIR / topology.mission_id
+
+            # Asegurar estructura de directorios
+            (mission_dir / "reports").mkdir(parents=True, exist_ok=True)
+            (mission_dir / "brains").mkdir(parents=True, exist_ok=True)
+            (mission_dir / "logs").mkdir(parents=True, exist_ok=True)
+
             # Limpiar señales previas
             for signal_file in [
                 mission_dir / "consensus.lock",

@@ -74,8 +74,29 @@ class MissionPlanner:
             f"El usuario desea: '{original_goal}'.\n"
             f"BLOQUEO: Faltan herramientas para: {tools_list}.\n"
             f"TAREA: Diseña y programa un servidor MCP o un Skill de AgentOrquestor "
-            f"que proporcione estas capacidades. NO empieces la tarea principal hasta "
-            f"que las herramientas estén funcionales en el hardware."
+            f"que proporcione estas capacidades. Al finalizar, utiliza la herramienta "
+            f"`register_new_tool` para que el sistema aprenda a usar tu creación."
         )
+
+    def register_tool(self, agent_name: str, tool_name: str):
+        """
+        Registra una nueva herramienta en el registry.yaml de forma persistente.
+        """
+        registry = self._load_registry()
+        if "agents" not in registry:
+            registry["agents"] = {}
+        
+        if agent_name in registry["agents"]:
+            if "tools" not in registry["agents"][agent_name]:
+                registry["agents"][agent_name]["tools"] = []
+            if tool_name not in registry["agents"][agent_name]["tools"]:
+                registry["agents"][agent_name]["tools"].append(tool_name)
+                telemetry.info(f"🆕 [PLANNER] Herramienta '{tool_name}' registrada para {agent_name}.")
+        
+        with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(registry, f, allow_unicode=True)
+            
+        # Forzar recarga interna
+        self.registry = registry
 
 planner = MissionPlanner()

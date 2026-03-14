@@ -491,12 +491,43 @@ class LLMInferenceBridge:
 
             except httpx.RequestError as e:
                 if attempt == max_retries - 1:
-                    raise
+                    break
                 delay = base_delay * (attempt + 1)
                 telemetry.error(f"🌐 Error de red: {e}. Reintentando en {delay}s...")
                 await asyncio.sleep(delay)
 
-        raise RuntimeError(f"❌ [{self.provider}] Max retries exceeded for 429 errors.")
+        # Si llegamos aquí, es que agotamos los reintentos
+        telemetry.error(f"💀 [{self.provider}] ASFIXIA METABÓLICA: Max retries exceeded.")
+        
+        # Reportar fallo fatal al bus antes de morir
+        fatal_msg = (
+            f"[NETWORK_FATAL_ERROR] El agente ha muerto por asfixia del proveedor ({self.provider}). "
+            f"Rate limit persistente tras {max_retries} reintentos."
+        )
+        
+        # Intentar escribir reporte final
+        try:
+            from core.event_bus import bus
+            from scripts.agent_runner import AgentReport
+            import json
+            
+            report = {
+                "timestamp": time.time(),
+                "sender": self.agent_name,
+                "type": "AGENT_REPORT",
+                "payload": {
+                    "mission_id": self.mission_id,
+                    "report": fatal_msg,
+                    "status": "FATAL",
+                    "round": 99 # Ronda de salida
+                }
+            }
+            bus.write_event(report)
+        except:
+            pass
+            
+        import sys
+        sys.exit(1)
 
     async def infer(
         self,
