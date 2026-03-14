@@ -1,13 +1,62 @@
+import os
 import json
+import logging
 from typing import Dict, Any, List
+from pathlib import Path
 from core.hardware_monitor import HardwareMonitor
 from core.telemetry import telemetry
 
 hardware_monitor = HardwareMonitor()
 
+class PerceptionEngine:
+    """
+    Destila e inyecta las guías OSAA v6.0 en el córtex de los agentes aislados.
+    Garantiza que el hardware (6GB VRAM) y las leyes termodinámicas se respeten.
+    """
+    def __init__(self, workspace_root: str = None):
+        if workspace_root is None:
+            # Detectar raíz del proyecto
+            workspace_root = Path(__file__).resolve().parent.parent
+        self.guides_dir = Path(workspace_root) / "docs" / "guides"
+
+    def _read_guide(self, filename: str) -> str:
+        path = self.guides_dir / filename
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        telemetry.warning(f"[PerceptionEngine] Guía no encontrada: {filename}")
+        return ""
+
+    def assemble_mind(self, agent_name: str) -> str:
+        """Ensambla el System Prompt estricto basado en la identidad del agente."""
+        core_mind = []
+        
+        # 1. Leyes Universales (Sobrevivir en tmux, truncar herramientas)
+        core_mind.append(self._read_guide("00_meta_guide_protocol.md")) # Base v6.0
+        core_mind.append(self._read_guide("01_worker_protocol.md"))
+        core_mind.append(self._read_guide("04_tool_blueprint.md"))
+        
+        # 2. Conciencia de Expansión (Guías 07-16)
+        # Buscamos todas las guías de la 07 a la 16
+        for i in range(7, 17):
+            # Buscar el archivo que empieza por el número
+            matches = list(self.guides_dir.glob(f"{i:02d}_*.md"))
+            if matches:
+                core_mind.append(matches[0].read_text(encoding="utf-8"))
+
+        # 3. Especialización Genética
+        if "Seed" in agent_name or "Bootstrap" in agent_name:
+            core_mind.append(self._read_guide("03_bootstrap_protocol.md"))
+        
+        if "Security" in agent_name or "Auditor" in agent_name or "Warden" in agent_name:
+            core_mind.append(self._read_guide("09_inquisidor_protocol.md"))
+
+        # Unir con separadores fuertes para la atención del LLM
+        return "\n\n" + "="*50 + "\n[OSAA v6.0 CONSTITUTIONAL CORE]\n" + "="*50 + "\n\n" + "\n\n".join(filter(None, core_mind))
+
 class PerceptionNode:
     """
-    Lóbulo Frontal v5.0 (Evolucionado).
+    Lóbulo Frontal v6.0 (Evolucionado).
+    Génesis y Estrategia Metabólica (Guía 00/06).
     Actúa como Estratega de Recursos y Generador de Contratos Cognitivos.
     """
     def __init__(self):
@@ -73,3 +122,4 @@ class PerceptionNode:
         return variables
 
 perception = PerceptionNode()
+engine = PerceptionEngine()

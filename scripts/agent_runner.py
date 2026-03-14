@@ -75,6 +75,8 @@ from core.neural_trace import (
     extract_trace_context
 )
 from core.constitution import get_global_directives
+from core.llm_bridge import LLMBridge
+from core.perception import PerceptionEngine
 
 
 # ---------------------------------------------------------------------------
@@ -1024,7 +1026,24 @@ class AgentRunner:
             return {"status": "ERROR", "reason": "Brain file empty or missing"}
 
         # Inicializar subsistemas
-        self.llm = LLMInferenceBridge(self.provider, self.model)
+        self.llm = LLMBridge(
+            provider=self.provider, 
+            model=self.model, 
+            api_key=LLMBridge.PROVIDER_KEYS.get(self.provider, lambda: "")(),
+            mcp_proxy=global_mcp_proxy,
+            agent_name=self.agent_name
+        )
+        # 1. Instanciar el motor de percepción (OSAA v6.0)
+        perception = PerceptionEngine()
+        
+        # 2. Ensamblar las leyes del OSAA v6.0 (Titanium Cortex)
+        telemetry.info(f"🧠 [{self.agent_name}] Ensamblando leyes constitucionales...")
+        osaa_core_laws = perception.assemble_mind(self.agent_name)
+        
+        # 3. Inyectar al inicio del System Prompt (Cerebro Blindado)
+        self.system_prompt = f"{osaa_core_laws}\n\n[CONTEXTO ESPECÍFICO DE LA MISIÓN]\n{self.system_prompt}"
+        
+        # 4. Inicializar subsistemas de control
         self.turn_manager = DialecticTurnManager(
             agent_name=self.agent_name,
             agent_role=self.agent_role,
@@ -1096,13 +1115,14 @@ class AgentRunner:
             
             tracer = get_tracer("agent_runner")
             with NeuralSpan.agent_span(tracer, f"Round {round_num + 1} - {self.agent_name}", current_task):
-                # 2e. Inferencia
-                telemetry.info(f"🤖 [{self.agent_name}] Invocando inferencia ({self.provider}/{self.model})...")
+                # 2e. Inferencia Centralizada (v6.0)
+                messages = self.llm._build_messages(self.system_prompt, debate_history, current_task)
+                tool_defs = self.llm._build_tool_definitions(self.allowed_tools)
+                
                 inference_result = await self.llm.infer(
-                    system_prompt=self.system_prompt,
-                    debate_history=debate_history,
-                    current_task=current_task,
-                    allowed_tools=self.allowed_tools,
+                    messages=messages,
+                    allowed_tools=tool_defs,
+                    mission_id=self.mission_id
                 )
                 
                 report = inference_result.get("content", "")

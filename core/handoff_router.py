@@ -1,9 +1,9 @@
 """
-AgentOrquestor — Handoff Router (Nodo Condicional de Transferencia) v5.0
+AgentOrquestor — Handoff Router (Nodo Condicional de Transferencia) v6.0
 ========================================================================
 Evalúa el estado del debate inter-proceso, decide si avanzar
-(consensus.lock) o retroceder (handoff_state.md), y gestiona
-la transición entre iteraciones del enjambre.
+(consensus.lock) o retroceder (handoff_state.md).
+Implementa la Guía 02: Dialectic Engine (Tesis, Antítesis, Síntesis).
 
 Integra: Arbitrator (convergencia), Shredder (destilación),
          TerminalMultiplexer (kill de sesiones).
@@ -550,20 +550,11 @@ class HandoffRouter:
             result["action"] = "HANDOFF"
             result["handoff_path"] = str(handoff_path)
 
-            # Matar terminales si se solicita
+            # Matar terminales si se solicita (Protocolo del Sepulturero - Guía 08)
             if kill_terminals:
-                mux = TerminalMultiplexer(mission_id)
-                # Reconstruir las sesiones activas de esta misión
-                import subprocess as sp
-                tmux_ls = sp.run(["tmux", "ls"], capture_output=True, text=True)
-                if tmux_ls.returncode == 0:
-                    for line in tmux_ls.stdout.splitlines():
-                        session_name = line.split(":")[0]
-                        if mission_id[:8] in session_name:
-                            mux._sessions.append(session_name)
-                    killed = mux.kill_all()
-                    result["terminals_killed"] = killed
-                    telemetry.info(f"💀 {killed} terminales eliminadas.")
+                self.evaluator.hw_monitor.purge_zombies(mission_id=mission_id)
+                result["terminals_killed"] = "Check telemetry for purge count"
+                telemetry.info(f"💀 Terminales de la misión {mission_id} purgadas por el Sepulturero.")
 
             telemetry.info(f"🔄 Ruta: {evaluation.status} → HANDOFF")
 

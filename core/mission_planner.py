@@ -1,8 +1,9 @@
 """
-AgentOrquestor — Mission Planner (Strategic Cortex) v5.0
+AgentOrquestor — Mission Planner (Strategic Cortex) v6.0
 =========================================================
-Audita el objetivo, evalúa capacidades (MCP/Skills) y coordina
-la ignición del enjambre. Implementa las Leyes Metacognitivas.
+El Lóbulo Frontal de OSAA. Audita el objetivo, evalúa capacidades
+y coordina la ignición del enjambre mediante DAGs atómicos.
+Implementa la Guía 06: Protocolo de la Génesis.
 """
 
 import yaml
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from core.telemetry import telemetry
 from core.perception import perception
+from core.llm_bridge import LLMBridge
 
 BASE_DIR = Path(__file__).parent.parent
 REGISTRY_PATH = BASE_DIR / "agents" / "registry.yaml"
@@ -42,12 +44,72 @@ Si falta una grúa (Herramienta), llamar al Herrero (SeedOrchestrator) para fabr
 class MissionPlanner:
     def __init__(self):
         self.registry = self._load_registry()
+        # Inicializar bridge para planificación estratégica
+        provider = os.getenv("PLANNER_PROVIDER", "groq")
+        model = os.getenv("PLANNER_MODEL", "llama-3.3-70b-versatile")
+        api_key = LLMBridge.PROVIDER_KEYS.get(provider, lambda: os.getenv("GROQ_API_KEY", ""))()
+        
+        self.llm = LLMBridge(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            agent_name="MissionPlanner"
+        )
 
     def _load_registry(self) -> Dict[str, Any]:
         if not REGISTRY_PATH.exists():
             return {}
         with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
+
+    def _build_planner_system_prompt(self) -> str:
+        """Construye el system prompt del planificador usando el protocolo Génesis."""
+        # Obtener herramientas disponibles para el contexto del LLM
+        catalog = self.llm.mcp.get_available_tools() if self.llm.mcp else []
+        tools_summary = "\n".join([f"- {t['name']}: {t.get('desc', '')}" for t in catalog])
+        
+        return f"{MISSION_PLANNER_PROTOCOL}\n\nARSENAL DISPONIBLE:\n{tools_summary}"
+
+    async def generate_plan(self, goal: str) -> List[Dict[str, Any]]:
+        """
+        Transforma un objetivo humano en un DAG de fases atómicas.
+        Sigue la Guía 06: Protocolo de la Génesis.
+        """
+        telemetry.info(f"🧠 [PLANNER] Generando DAG para: '{goal}'")
+        
+        system_prompt = self._build_planner_system_prompt()
+        user_task = (
+            f"OBJETIVO: {goal}\n\n"
+            f"Genera un plan de acción en formato JSON. El JSON debe ser una lista de fases, "
+            f"donde cada fase tiene: 'id', 'name', 'responsible_agent' (LeadDeveloper, SecurityQA, Validator), "
+            f"y 'description'. Ejemplo: [{{'id': 1, 'name': 'Analizar Código', 'responsible_agent': 'LeadDeveloper', 'description': '...'}}]"
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_task}
+        ]
+
+        res = await self.llm.infer(messages=messages, mission_id="planning_phase")
+        
+        if res["status"] == "OK":
+            content = res["content"]
+            # Intentar extraer JSON de la respuesta (por si el LLM añade texto extra)
+            try:
+                import re
+                json_match = re.search(r"(\[.*\])", content, re.DOTALL)
+                if json_match:
+                    plan = json.loads(json_match.group(1))
+                    telemetry.info(f"✅ [PLANNER] Plan de {len(plan)} fases generado con éxito.")
+                    return plan
+            except Exception as e:
+                telemetry.error(f"❌ [PLANNER] Error parseando DAG: {e}")
+        
+        # Plan de respaldo por si el LLM falla
+        telemetry.warning("⚠️ [PLANNER] Usando plan de respaldo lineal.")
+        return [
+            {"id": 1, "name": "Ejecución Directa", "responsible_agent": "LeadDeveloper", "description": goal}
+        ]
 
     def audit_capabilities(self, goal: str) -> Dict[str, Any]:
         """

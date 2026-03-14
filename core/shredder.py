@@ -4,8 +4,9 @@ from core.telemetry import telemetry
 
 class LogShredder:
     """
-    Motor de Higiene Metabólica v4.0.
-    Realiza 'Context Distillation' para mantener el debate bajo los límites de VRAM.
+    Chronicler Protocol v6.0 (El Destilador de Memoria).
+    Implementa la Guía 05 para evitar el colapso de la ventana de contexto.
+    Realiza 'Context Distillation' agresiva para proteger los 6GB de VRAM.
     """
     def __init__(self, max_tokens_proxy: int = 1500):
         self.max_tokens_proxy = max_tokens_proxy
