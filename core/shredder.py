@@ -13,7 +13,9 @@ class LogShredder:
             r'DEBUG:.*',
             r'INFO:root:.*',
             r'\[.*\] .*:.*',
-            r'HTTP Request:.*'
+            r'HTTP Request:.*',
+            r'{"timestamp":.*',  # JSON estructural de eventos
+            r'202\d-\d\d-\d\d \d\d:.*' # Timestamps de logs
         ]
 
     def distill(self, raw_history: List[Dict[str, str]]) -> str:

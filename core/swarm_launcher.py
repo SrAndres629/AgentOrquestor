@@ -437,12 +437,14 @@ class ConsensusWatchdog:
         agents_expected: Optional[List[str]] = None,
         max_rounds_per_agent: int = 3,
         poll_interval: float = 2.0,
+        terminals: Optional[TerminalMultiplexer] = None,
     ):
         self.mission_dir = mission_dir
         self.mission_id = mission_id or mission_dir.name
         self.agents_expected = agents_expected or []
         self.max_rounds = max_rounds_per_agent
         self.poll_interval = poll_interval
+        self.terminals = terminals
         self.consensus_path = mission_dir / "consensus.lock"
         self.handoff_path = mission_dir / "handoff_state.md"
         self.abort_path = mission_dir / "abort.signal"
@@ -492,6 +494,12 @@ class ConsensusWatchdog:
             f"⚡ Watchdog: Todos los agentes agotaron {self.max_rounds} rondas. "
             "Auto-invocando HandoffRouter para forzar decisión."
         )
+        
+        # --- PARCHE 2: Limpieza de Zombies ---
+        if self.terminals:
+            telemetry.info("🧹 Watchdog: Purgando terminales antes del handoff para evitar zombies.")
+            self.terminals.kill_all()
+            
         try:
             from core.handoff_router import HandoffRouter
             router = HandoffRouter()
@@ -715,13 +723,14 @@ class SwarmLauncher:
                     env_vars=env_vars,
                 )
 
-            # Watchdog de consenso (con prevención de deadlock)
+            # Watchdog de consenso (con prevención de deadlock y limpieza de zombies)
             agent_names = [a.name for a in topology.agents]
             watchdog = ConsensusWatchdog(
                 mission_dir=mission_dir,
                 mission_id=topology.mission_id,
                 agents_expected=agent_names,
                 max_rounds_per_agent=topology.max_iterations,
+                terminals=mux,
             )
             signal_result = await watchdog.watch(
                 timeout=self.watchdog_timeout,

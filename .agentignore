@@ -1,0 +1,60 @@
+# AgentOrquestor - Context Filter (v5.0)
+
+# Ephemeral State
+.cortex/
+.gemini/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build & Distrib
+dist/
+build/
+*.egg-info/
+
+# Logs & Telemetry
+logs/
+*.log
+bus_buffer.jsonl*
+reports/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Mission artifacts (handled via specific tools)
+.cortex/missions/*
+
+# Legacy/Bloatware (marked for pruning)
+core/graph.py
+core/state.py
+core/router.py
+core/bootstrapper.py
+core/arbitrator.py
+core/cognitive_engine.py
+core/memory_manager.py
+core/transactions.py
+core/quota_manager.py
+core/chronicler.py
+core/diff_engine.py
+core/robustness.py
+core/mission_planner.py
+core/hardware.py
+
+# Agents Legacy
+agents/factory.py
+agents/manager.py
+agents/optimization.py
+agents/evolution.py
+agents/signatures.py
+
+# Memory Legacy (replaced by Brains)
+memory/
+sandbox/
+ui/
+view_war_room.py
+test_mcp_health.py
+tests/

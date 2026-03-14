@@ -78,7 +78,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 # Límites metabólicos por agente
 MAX_CONTEXT_CHARS = 32000          # ~8000 tokens aprox
 MAX_OUTPUT_CHARS = 16000           # ~4000 tokens aprox
-BUS_TAIL_LINES = 50               # Últimas N líneas del bus a considerar
+BUS_TAIL_LINES = 20               # Últimas N líneas del bus a considerar (optimizando tokens)
 TURN_POLL_INTERVAL = 2.0           # Segundos entre polls de turno
 MAX_TURN_WAIT = 120.0              # Timeout máximo esperando turno
 INFERENCE_TIMEOUT = 60.0           # Timeout de llamada al LLM
@@ -424,6 +424,11 @@ class LLMInferenceBridge:
                 mcp_result = {"status": "ERROR", "message": str(e)[:300]}
 
             result_text = json.dumps(mcp_result, ensure_ascii=False)
+            
+            # --- PARCHE 3: Truncamiento Defensivo ---
+            if len(result_text) > 4000:
+                result_text = result_text[:4000] + "... [OUTPUT_TRUNCATED_BY_SYSTEM]"
+            
             telemetry.info(f"🔧 Tool Result [{tool_name}]: {result_text[:200]}")
 
             # Registrar para traceability
@@ -696,6 +701,7 @@ class AgentRunner:
         self.agent_role = "proponent"
         self.provider = "groq"
         self.model = "llama-3.3-70b-versatile"
+        self.allowed_tools: List[str] = []
 
         # Subsistemas
         self.token_tracker = TokenTracker()
@@ -778,15 +784,16 @@ class AgentRunner:
                 else:
                     self.agent_role = "proponent"
 
-            if "modelo:" in line_lower or "model:" in line_lower:
-                parts = line.split("/")
-                if len(parts) >= 2:
-                    self.provider = parts[0].split(":")[-1].strip().lower()
-                    self.model = "/".join(parts[1:]).strip()
+            if "herramientas:" in line_lower or "tools:" in line_lower:
+                tools_line = line.split(":")[-1].strip()
+                # Parsear lista separada por comas dentro o fuera de [ ]
+                tools_line = tools_line.strip("[]")
+                self.allowed_tools = [t.strip().strip("`") for t in tools_line.split(",") if t.strip()]
 
         telemetry.info(
             f"🧠 [{self.agent_name}] Cerebro cargado — "
             f"Rol: {self.agent_role}, Modelo: {self.provider}/{self.model}, "
+            f"Tools: {self.allowed_tools}, "
             f"Contexto: {self.token_tracker.estimate_tokens(content)} tokens"
         )
 
@@ -1007,6 +1014,7 @@ class AgentRunner:
                 system_prompt=self.system_prompt,
                 debate_history=debate_history,
                 current_task=current_task,
+                allowed_tools=self.allowed_tools,
             )
 
             report = inference_result.get("content", "")
