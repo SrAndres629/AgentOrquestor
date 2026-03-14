@@ -34,10 +34,12 @@ class MissionPlanner:
         
         # Heurísticas de capacidad (Bootstrap Detection)
         capabilities = {
-            "browser": ["puppeteer", "browser", "web"],
-            "filesystem": ["file", "disk", "write"],
-            "security": ["scan", "audit", "exploit"],
-            "network": ["request", "api", "endpoint", "traffic"]
+            "browser": ["puppeteer", "browser", "web", "scraping", "search"],
+            "filesystem": ["file", "disk", "write", "read", "read_file", "write_file", "filesystem"],
+            "security": ["scan", "audit", "exploit", "security", "vulnerability"],
+            "network": ["request", "api", "endpoint", "traffic", "http", "fetch"],
+            "database": ["sql", "postgres", "sqlite", "database", "query", "supabase"],
+            "image": ["generate_image", "vision", "ocr", "image", "stable diffusion"]
         }
         
         # Obtener todas las herramientas cargadas en el registry
@@ -51,13 +53,17 @@ class MissionPlanner:
         for cap, keywords in capabilities.items():
             if any(k in goal_lower for k in keywords):
                 # Verificar si algún agente tiene herramientas para esta capacidad
-                # En OSAA v5.0, si no hay match claro, marcamos como missing.
-                has_cap = any(k in " ".join(all_loaded_tools).lower() for k in keywords)
+                has_cap = False
+                for t in all_loaded_tools:
+                    if any(k in t.lower() for k in keywords):
+                        has_cap = True
+                        break
+                
                 if not has_cap:
-                    missing_tools.append(f"tooling_{cap}")
+                    missing_tools.append(cap)
 
         if missing_tools:
-            telemetry.warning(f"🚧 Capacidad faltante detectada: {missing_tools}. Activando Misión Cero.")
+            telemetry.warning(f"🚧 Capacidad faltante detectada: {missing_tools}. Sugiriendo Misión Cero.")
             return {
                 "bootstrap_needed": True,
                 "missing_capabilities": missing_tools,

@@ -67,6 +67,13 @@ from core.swarm_launcher import (
 from core.shredder import LogShredder
 from core.hardware_monitor import HardwareMonitor
 from core.mcp_proxy import mcp_proxy as global_mcp_proxy
+from core.metabolic_governor import mcu as global_mcu
+from core.neural_trace import (
+    initialize_tracer, 
+    get_tracer, 
+    NeuralSpan, 
+    extract_trace_context
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +106,7 @@ class TurnState:
     last_speaker: Optional[str] = None
     round_number: int = 0
     is_my_turn: bool = False
+    trace_context: Optional[Any] = None
 
 
 class DialecticTurnManager:
@@ -131,94 +139,78 @@ class DialecticTurnManager:
         self.bus_path = bus_path
         self.state = TurnState(my_name=agent_name, my_role=agent_role)
 
-    def _read_bus_tail(self, n_lines: int = BUS_TAIL_LINES) -> List[Dict[str, Any]]:
-        """
-        Lee las últimas N líneas del bus JSONL de forma segura.
-        Tolerante a líneas parciales o corruptas (las ignora).
-        """
-        content = safe_read(self.bus_path)
-        if not content:
-            return []
-
-        lines = content.strip().splitlines()
-        tail = lines[-n_lines:] if len(lines) > n_lines else lines
-        events = []
-        for line in tail:
-            try:
-                events.append(json.loads(line))
-            except (json.JSONDecodeError, ValueError):
-                continue  # Línea corrupta o parcial, ignorar
-        return events
-
-    def _get_last_agent_event(self, events: List[Dict]) -> Optional[Dict]:
-        """Retorna el último evento de tipo AGENT_REPORT del bus."""
-        for event in reversed(events):
-            if event.get("type") == "AGENT_REPORT":
-                return event
-        return None
-
-    def _get_mission_events(self, events: List[Dict], mission_id: str) -> List[Dict]:
-        """Filtra eventos que pertenecen a la misión actual."""
-        return [
-            e for e in events
-            if e.get("payload", {}).get("mission_id") == mission_id
-            or e.get("type") == "AGENT_REPORT"
-        ]
+    # Los ayudantes _read_bus_tail y _get_mission_events han sido eliminados
+    # ya que TurnManager ahora usa bus.read_mailbox activamente.
 
     def check_turn(self, mission_id: str) -> TurnState:
         """
-        Determina si es el turno de este agente.
-        
-        Lógica:
-        1. Sin eventos previos → turno del agente con first_turn=True
-        2. Último emisor == yo → NO es mi turno (ya hablé)
-        3. Último emisor está en mi lista "after" → ES mi turno
-        4. Otro caso → NO es mi turno (esperar)
+        Determina si es el turno de este agente usando Mailboxes.
         """
-        events = self._read_bus_tail()
-        mission_events = self._get_mission_events(events, mission_id)
-
-        # Sin eventos previos: turno del first_turn
-        if not mission_events:
-            turn_config = self.TURN_AFTER.get(self.agent_role, {})
-            self.state.is_my_turn = turn_config.get("first_turn", False)
-            self.state.last_speaker = None
-            self.state.round_number = 0
-            return self.state
-
-        last_event = self._get_last_agent_event(mission_events)
-        if not last_event:
-            # Solo hay eventos de sistema, no de agentes
-            turn_config = self.TURN_AFTER.get(self.agent_role, {})
-            self.state.is_my_turn = turn_config.get("first_turn", False)
-            return self.state
-
-        last_sender = last_event.get("sender", "")
-        self.state.last_speaker = last_sender
-
-        # Ya hablé yo → esperar
-        if last_sender == self.agent_name:
-            self.state.is_my_turn = False
-            return self.state
-
-        # ¿El último emisor desbloquea mi turno?
+        from core.event_bus import bus
+        
+        # 1. Leer mi propio buzón para ver mi última acción
+        my_events = bus.read_mailbox(self.agent_name, limit=5)
+        my_mission_events = [e for e in my_events if e.get("payload", {}).get("mission_id") == mission_id]
+        my_last_report = next((e for e in reversed(my_mission_events) if e.get("type") == "AGENT_REPORT"), None)
+        
+        # 2. Identificar de quién dependo
         turn_config = self.TURN_AFTER.get(self.agent_role, {})
         speakers_after = turn_config.get("after", [])
+        is_first = turn_config.get("first_turn", False)
+        
+        # Si soy el primero y no he dicho nada: TURNO MÍO
+        if not my_last_report and is_first:
+            # Verificar si alguien más ya habló (pudo haber empezado otro)
+            # Para estar seguros, checkeamos todos los 'after'
+            someone_spoke = False
+            for peer in speakers_after:
+                peer_events = bus.read_mailbox(peer, limit=2)
+                if any(e.get("payload", {}).get("mission_id") == mission_id for e in peer_events):
+                    someone_spoke = True
+                    break
+            
+            if not someone_spoke:
+                self.state.is_my_turn = True
+                self.state.round_number = 0
+                self.state.trace_context = None # No hay evento previo para extraer contexto
+                return self.state
 
-        # Buscar si el rol del último emisor coincide con algún trigger
-        # (comparamos por nombre de agente, que puede contener el rol)
-        sender_lower = last_sender.lower()
-        self.state.is_my_turn = any(
-            trigger in sender_lower for trigger in speakers_after
-        ) or last_sender != self.agent_name
+        # 3. Leer buzones de los que 'desbloquean' mi turno
+        peer_reports = []
+        for peer in speakers_after:
+            peer_events = bus.read_mailbox(peer, limit=5)
+            peer_mission_events = [e for e in peer_events if e.get("payload", {}).get("mission_id") == mission_id]
+            peer_last = next((e for e in reversed(peer_mission_events) if e.get("type") == "AGENT_REPORT"), None)
+            if peer_last:
+                peer_reports.append(peer_last)
+        
+        if not peer_reports:
+            # Si no hay reportes de mis triggers, y no soy el primero: ESPERAR
+            self.state.is_my_turn = is_first and not my_last_report
+            self.state.trace_context = None # No hay evento previo para extraer contexto
+            return self.state
 
-        # Contar rondas (cuántas veces yo ya hablé)
-        my_reports = [
-            e for e in mission_events
-            if e.get("type") == "AGENT_REPORT" and e.get("sender") == self.agent_name
-        ]
-        self.state.round_number = len(my_reports)
-
+        # Encontrar el reporte de par más reciente
+        peer_reports.sort(key=lambda x: x.get("timestamp", 0))
+        last_peer_report = peer_reports[-1]
+        
+        self.state.last_speaker = last_peer_report.get("sender")
+        
+        # Lógica de turno:
+        # Si el reporte de par es más reciente que el mío (o no tengo ninguno) -> MI TURNO
+        if not my_last_report:
+            self.state.is_my_turn = True
+            self.state.trace_context = extract_trace_context(last_peer_report)
+        else:
+            self.state.is_my_turn = last_peer_report.get("timestamp", 0) > my_last_report.get("timestamp", 0)
+            if self.state.is_my_turn:
+                self.state.trace_context = extract_trace_context(last_peer_report)
+            else:
+                self.state.trace_context = None # No es mi turno, no hay contexto relevante para iniciar
+            
+        # Contar rondas
+        self.state.round_number = len([e for e in my_mission_events if e.get("type") == "AGENT_REPORT"])
+        
         return self.state
 
     async def wait_for_turn(self, mission_id: str, timeout: float = MAX_TURN_WAIT) -> bool:
@@ -492,68 +484,65 @@ class LLMInferenceBridge:
         max_retries = 5
         base_delay = 2.0  # s
         
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-                    response = await client.post(
-                        self.endpoint,
-                        headers=headers,
-                        json=payload,
+        tracer = get_tracer("llm_bridge")
+        with NeuralSpan.llm_span(tracer, "LLM Inference", self.model, str(payload.get("messages", ""))[:1000]):
+            for attempt in range(max_retries):
+                try:
+                    async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
+                        response = await client.post(
+                            self.endpoint,
+                            headers=headers,
+                            json=payload,
+                        )
+
+                    if response.status_code == 200:
+                        return response.json()
+                    
+                    if response.status_code == 429:
+                        delay = (base_delay * (2 ** attempt)) + (random.random() * 2.0)
+                        telemetry.warning(
+                            f"⏳ [{self.provider}] Rate Limit (429). Reintentando en {delay:.1f}s... "
+                            f"(Intento {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    
+                    # Otros errores HTTP
+                    raise RuntimeError(
+                        f"HTTP {response.status_code}: {response.text[:500]}"
                     )
 
-                if response.status_code == 200:
-                    return response.json()
-                
-                if response.status_code == 429:
-                    delay = (base_delay * (2 ** attempt)) + (random.random() * 2.0)
-                    telemetry.warning(
-                        f"⏳ [{self.provider}] Rate Limit (429). Reintentando en {delay:.1f}s... "
-                        f"(Intento {attempt + 1}/{max_retries})"
-                    )
+                except httpx.RequestError as e:
+                    if attempt == max_retries - 1:
+                        break
+                    delay = base_delay * (attempt + 1)
+                    telemetry.error(f"🌐 Error de red: {e}. Reintentando en {delay}s...")
                     await asyncio.sleep(delay)
-                    continue
-                
-                # Otros errores HTTP
-                raise RuntimeError(
-                    f"HTTP {response.status_code}: {response.text[:500]}"
-                )
 
-            except httpx.RequestError as e:
-                if attempt == max_retries - 1:
-                    break
-                delay = base_delay * (attempt + 1)
-                telemetry.error(f"🌐 Error de red: {e}. Reintentando en {delay}s...")
-                await asyncio.sleep(delay)
-
-        # Si llegamos aquí, es que agotamos los reintentos
-        telemetry.error(f"💀 [{self.provider}] ASFIXIA METABÓLICA: Max retries exceeded.")
-        
-        # Reportar fallo fatal al bus antes de morir
-        fatal_msg = (
-            f"[NETWORK_FATAL_ERROR] El agente ha muerto por asfixia del proveedor ({self.provider}). "
-            f"Rate limit persistente tras {max_retries} reintentos."
-        )
-        
-        # Intentar escribir reporte final
-        try:
-            from core.event_bus import bus
-            from scripts.agent_runner import AgentReport
-            import json
+            # Si llegamos aquí, es que agotamos los reintentos
+            telemetry.error(f"💀 [{self.provider}] ASFIXIA METABÓLICA: Max retries exceeded.")
             
-            report = {
-                "timestamp": time.time(),
-                "sender": self.agent_name,
-                "type": "AGENT_REPORT",
-                "payload": {
+            # Reportar fallo fatal al bus antes de morir
+            fatal_msg = (
+                f"[NETWORK_FATAL_ERROR] El agente ha muerto por asfixia del proveedor ({self.provider}). "
+                f"Rate limit persistente tras {max_retries} reintentos."
+            )
+            
+            # Intentar escribir reporte final
+            try:
+                from core.event_bus import bus
+                
+                report_payload = {
                     "mission_id": self.mission_id,
                     "report": fatal_msg,
                     "status": "FATAL",
                     "round": 99 # Ronda de salida
                 }
-            }
-            bus.write_event(report)
-        except:
-            pass
+                bus.publish("AGENT_REPORT", report_payload, sender=self.agent_name)
+            except:
+                pass
+                
+            raise RuntimeError("Max retries reached for LLM API.")
             
         import sys
         sys.exit(1)
@@ -643,8 +632,15 @@ class LLMInferenceBridge:
                     # Agregar el mensaje del asistente con tool_calls
                     messages.append(message)
 
-                    # Ejecutar herramientas y obtener resultados
+                    # Ejecutar herramientas y obtener resultados (Titanium Funnel Applied - Guide 04)
                     tool_results = await self._execute_tool_calls(tool_calls)
+                    
+                    MAX_TOOL_CHARS = 4000
+                    for tr in tool_results:
+                        content = tr.get("content", "")
+                        if len(content) > MAX_TOOL_CHARS:
+                            tr["content"] = content[:MAX_TOOL_CHARS] + f"\n... [TRUNCADO: Salida superaba los {MAX_TOOL_CHARS} chars. Refina tu consulta.]"
+
                     messages.extend(tool_results)
 
                     # Actualizar payload para la siguiente iteración
@@ -791,6 +787,7 @@ class AgentRunner:
         self.token_tracker = TokenTracker()
         self.shredder = LogShredder()
         self.hw_monitor = HardwareMonitor()
+        self.mcu = global_mcu
         self.llm: Optional[LLMInferenceBridge] = None
         self.turn_manager: Optional[DialecticTurnManager] = None
 
@@ -817,21 +814,11 @@ class AgentRunner:
         self._shutdown_requested = True
 
     def _emit_shutdown_event(self):
-        """Escribe un evento de shutdown al bus IPC."""
-        bus_path = self.mission_dir.parent.parent / "bus_buffer.jsonl"
-        event = json.dumps({
-            "timestamp": time.time(),
-            "sender": self.agent_name,
-            "type": "AGENT_SHUTDOWN",
-            "payload": {
-                "mission_id": self.mission_id,
-                "reason": "SIGTERM/SIGINT received",
-                "rounds_completed": self.turn_manager.state.round_number if self.turn_manager else 0,
-            },
-            "handshake": False,
-        })
+        """Emite evento de apagado al buzón."""
+        from core.event_bus import bus
         try:
-            atomic_append(bus_path, event)
+            bus.publish("AGENT_SHUTDOWN", {"mission_id": self.mission_id}, sender=self.agent_name)
+            telemetry.info(f"🛑 [{self.agent_name}] Evento SHUTDOWN emitido.")
         except Exception:
             pass  # Best-effort en shutdown
 
@@ -984,29 +971,24 @@ class AgentRunner:
 
         return task
 
-    def _emit_report(self, report: str, inference_result: Dict[str, Any]) -> None:
+    def _emit_report(self, report: str, inference_result: Dict[str, Any]):
         """
-        Escribe el reporte del agente en dos destinos:
-        1. Bus IPC (bus_buffer.jsonl) → para sincronización de turnos
-        2. Filesystem (.cortex/missions/{id}/reports/) → para HandoffRouter
+        Emite el reporte al buzón atómico y al filesystem.
         """
-        # 1. Bus IPC
-        bus_event = json.dumps({
-            "timestamp": time.time(),
-            "sender": self.agent_name,
-            "type": "AGENT_REPORT",
-            "payload": {
-                "mission_id": self.mission_id,
-                "report": report[:2000],         # Truncar para bus (límite ligero)
-                "tokens_used": inference_result.get("tokens_used", 0),
-                "model": inference_result.get("model", ""),
-                "latency_ms": inference_result.get("latency_ms", 0),
-                "round": self.turn_manager.state.round_number if self.turn_manager else 0,
-            },
-            "handshake": False,
-        }, ensure_ascii=False)
-
-        atomic_append(self._get_bus_path(), bus_event)
+        from core.event_bus import bus
+        
+        # 1. Mailbox IPC
+        mcu_health = self.mcu.check_health(self.mission_id)
+        payload = {
+            "mission_id": self.mission_id,
+            "report": report[:2000],         # Truncar para bus (límite ligero)
+            "tokens_used": inference_result.get("tokens_used", 0),
+            "usd_cost": mcu_health["used_usd"],
+            "model": inference_result.get("model", ""),
+            "latency_ms": inference_result.get("latency_ms", 0),
+            "round": self.turn_manager.state.round_number if self.turn_manager else 0,
+        }
+        bus.publish("AGENT_REPORT", payload, sender=self.agent_name)
 
         # 2. Filesystem (reporte completo)
         reports_dir = self.mission_dir / "reports"
@@ -1083,7 +1065,7 @@ class AgentRunner:
             # 2c. Construir tarea para esta ronda
             current_task = self._build_current_task(round_num)
 
-            # 2d. Verificar metabolismo
+            # 2d. Verificar metabolismo (Token Tracking + Budget Checking)
             if self.token_tracker.needs_shredding():
                 telemetry.info(f"🧹 [{self.agent_name}] Contexto saturado. Solicitando shredding...")
                 # Destilar el system prompt si es necesario
@@ -1092,17 +1074,78 @@ class AgentRunner:
                 self.token_tracker.reset()
                 self.token_tracker.track_context(self.system_prompt)
 
-            # 2e. Inferencia
-            telemetry.info(f"🤖 [{self.agent_name}] Invocando inferencia ({self.provider}/{self.model})...")
-            inference_result = await self.llm.infer(
-                system_prompt=self.system_prompt,
-                debate_history=debate_history,
-                current_task=current_task,
-                allowed_tools=self.allowed_tools,
-            )
+            # --- NUEVO: Control Presupuestario (OSAA v6.0) ---
+            mcu_health = self.mcu.check_health(self.mission_id)
+            if mcu_health["status"] == "STARVING":
+                telemetry.error(f"💸 [{self.agent_name}] ASFIXIA FINANCIERA: Presupuesto agotado (${mcu_health['used_usd']:.4f}).")
+                result["status"] = "METABOLIC_EXHAUSTION"
+                break
+            elif mcu_health["status"] == "CONGESTED":
+                telemetry.warning(f"⚠️ [{self.agent_name}] Alerta Metabólica: Presupuesto al {mcu_health['percent']:.1f}%.")
+
+            # --- NUEVO: Neural Trace (OSAA v6.0) ---
+            from opentelemetry import propagate
+            from opentelemetry import trace as trace_api
+            
+            ctx = self.turn_manager.state.trace_context
+            token = None
+            if ctx:
+                token = propagate.attach(ctx)
+            
+            tracer = get_tracer("agent_runner")
+            with NeuralSpan.agent_span(tracer, f"Round {round_num + 1} - {self.agent_name}", current_task):
+                # 2e. Inferencia
+                telemetry.info(f"🤖 [{self.agent_name}] Invocando inferencia ({self.provider}/{self.model})...")
+                inference_result = await self.llm.infer(
+                    system_prompt=self.system_prompt,
+                    debate_history=debate_history,
+                    current_task=current_task,
+                    allowed_tools=self.allowed_tools,
+                )
+                
+                report = inference_result.get("content", "")
+                tokens_in = self.token_tracker.estimate_tokens(self.system_prompt + current_task)
+                tokens_out = inference_result.get("tokens_used", 0) - tokens_in # Aproximación
+                if tokens_out < 0: tokens_out = inference_result.get("tokens_used", 0) # Fallback
+                
+                # Registrar consumo financiero
+                self.mcu.record_consumption(
+                    mission_id=self.mission_id,
+                    agent=self.agent_name,
+                    model=self.model,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out
+                )
+                
+                result["total_tokens"] += (tokens_in + tokens_out)
+
+                if not report:
+                    telemetry.error(f"❌ [{self.agent_name}] Inferencia retornó vacío.")
+                    if token: propagate.detach(token)
+                    continue
+
+                # 2f. Emitir reporte
+                self._emit_report(report, inference_result)
+                result["rounds_completed"] = round_num + 1
+                
+                if token:
+                    propagate.detach(token)
 
             report = inference_result.get("content", "")
-            result["total_tokens"] += inference_result.get("tokens_used", 0)
+            tokens_in = self.token_tracker.estimate_tokens(self.system_prompt + current_task)
+            tokens_out = inference_result.get("tokens_used", 0) - tokens_in # Aproximación
+            if tokens_out < 0: tokens_out = inference_result.get("tokens_used", 0) # Fallback
+            
+            # Registrar consumo financiero
+            self.mcu.record_consumption(
+                mission_id=self.mission_id,
+                agent=self.agent_name,
+                model=self.model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out
+            )
+            
+            result["total_tokens"] += (tokens_in + tokens_out)
 
             if not report:
                 telemetry.error(f"❌ [{self.agent_name}] Inferencia retornó vacío.")
@@ -1179,6 +1222,16 @@ def parse_args() -> argparse.Namespace:
 async def main():
     args = parse_args()
 
+    # Inicializar Neural Trace
+    initialize_tracer(f"agent-{args.agent_name}")
+
+    # DEBUG: Verificar fcntl
+    try:
+        import fcntl
+        telemetry.info(f"🧪 [DEBUG] fcntl verificado en {args.agent_name}")
+    except Exception as e:
+        telemetry.error(f"❌ [DEBUG] fcntl FALLÓ en {args.agent_name}: {e}")
+
     runner = AgentRunner(
         brain_path=args.brain,
         mission_id=args.mission_id,
@@ -1192,18 +1245,13 @@ async def main():
         from core.event_bus import bus
         telemetry.error(f"💥 [FATAL] {args.agent_name} colapsó: {e}")
         
-        fatal_event = {
-            "timestamp": time.time(),
-            "sender": args.agent_name,
-            "type": "AGENT_FATAL_ERROR",
-            "payload": {
-                "mission_id": args.mission_id,
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
+        payload = {
+            "mission_id": args.mission_id,
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }
         try:
-            bus.write_event(fatal_event)
+            bus.publish("AGENT_FATAL_ERROR", payload, sender=args.agent_name)
         except:
             pass # No podemos hacer mucho más si el bus también falla
             

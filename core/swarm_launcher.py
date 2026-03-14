@@ -31,6 +31,8 @@ import yaml
 from core.telemetry import telemetry
 from core.hardware_monitor import HardwareMonitor
 from core.shredder import LogShredder
+from core.neural_trace import initialize_tracer, get_tracer, NeuralSpan
+from opentelemetry import trace as trace_api, propagate
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +222,7 @@ class BrainForge:
             hw_section = (
                 f"## Restricciones de Hardware (Tiempo Real)\n"
                 f"- VRAM Disponible: {vram.get('vram_total', 0) - vram.get('vram_used', 0):.0f} MB\n"
-                f"- GPU Temp: {vram.get('gpu_temp', 0):.0f}°C\n"
+                f"- GPU Temp: {vram.get('gpu_temp', 0):.0f}C\n"
                 f"- Presupuesto VRAM por agente: {agent.vram_budget_mb} MB\n"
                 f"- Acción recomendada: {hardware_snapshot.get('action', 'PROCEED')}\n\n"
             )
@@ -322,11 +324,11 @@ class TerminalMultiplexer:
         )
         return result.returncode == 0
 
-    def spawn(
+    def deploy_agent(
         self,
         agent: AgentSlot,
-        brain_path: Path,
         runner_script: str,
+        brain_path: Path,
         env_vars: Optional[Dict[str, str]] = None,
     ) -> str:
         """
@@ -470,27 +472,19 @@ class ConsensusWatchdog:
 
     def _count_agent_rounds(self) -> Dict[str, int]:
         """
-        Lee el bus IPC y cuenta cuántos AGENT_REPORT ha emitido
-        cada agente para esta misión. Tolerante a líneas corruptas.
+        Cuenta reportes usando los buzones individuales de cada agente.
         """
+        from core.event_bus import bus
         counts: Dict[str, int] = {name: 0 for name in self.agents_expected}
-        content = safe_read(self.bus_path)
-        if not content:
-            return counts
-
-        for line in content.strip().splitlines():
-            try:
-                event = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if event.get("type") != "AGENT_REPORT":
-                continue
-            payload = event.get("payload", {})
-            if payload.get("mission_id") != self.mission_id:
-                continue
-            sender = event.get("sender", "")
-            if sender in counts:
-                counts[sender] += 1
+        
+        for agent_name in self.agents_expected:
+            events = bus.read_mailbox(agent_name, limit=10)
+            mission_reports = [
+                e for e in events 
+                if e.get("type") == "AGENT_REPORT" 
+                and e.get("payload", {}).get("mission_id") == self.mission_id
+            ]
+            counts[agent_name] = len(mission_reports)
         return counts
 
     def _all_agents_exhausted(self) -> bool:
@@ -578,13 +572,15 @@ class ConsensusWatchdog:
                 telemetry.info("🛑 Watchdog: abort.signal detectado → Cancelación.")
                 return "abort"
 
-            # 1.1. Intercepción de Fatalidad (Death Rattle)
+            # 1.1. Intercepción de Fatalidad (Death Rattle) usando Mailboxes
             from core.event_bus import bus
-            last_events = bus.read_last_n(5)
-            for event in last_events:
-                if event.get("type") == "AGENT_FATAL_ERROR":
+            all_recent = bus.read_all_events(limit_per_actor=3)
+            for event in all_recent:
+                # Filtrar por tipo FATAL y por Mission ID para evitar falsos positivos de runs previos
+                payload = event.get("payload", {})
+                if event.get("type") == "AGENT_FATAL_ERROR" and payload.get("mission_id") == self.mission_id:
                     sender = event.get("sender", "Unknown")
-                    err_msg = event.get("payload", {}).get("error", "Error desconocido")
+                    err_msg = payload.get("error", "Error desconocido")
                     telemetry.error(f"💀 Watchdog: ¡MUERTE DETECTADA! Agente {sender} colapsó: {err_msg}")
                     telemetry.warning("🔄 Abortando espera y forzando re-iteración inmediata.")
                     return "handoff"
@@ -646,6 +642,8 @@ class SwarmLauncher:
         self.watchdog_timeout = watchdog_timeout
         # Runner por defecto: scripts/agent_runner.py
         self.runner_script = runner_script or str(BASE_DIR / "scripts" / "agent_runner.py")
+        # Inicializar tracer para el orquestador
+        initialize_tracer("SwarmLauncher")
 
     def _load_env_vars(self) -> Dict[str, str]:
         """Carga variables de entorno del .env para inyectarlas en terminales."""
@@ -674,7 +672,19 @@ class SwarmLauncher:
         Returns:
             Diccionario con el resultado de la misión.
         """
-        telemetry.info(f"🚀 SwarmLauncher: Iniciando misión — {goal}")
+        from core.mission_planner import planner
+        
+        # --- 0. Auditoría de Capacidades (Constitución Guía 03) ---
+        audit = planner.audit_capabilities(goal)
+        current_goal = goal
+        is_bootstrap = False
+        
+        if audit.get("bootstrap_needed"):
+            telemetry.warning(f"🔨 [LAUNCHER] Gaps detectados: {audit['missing_capabilities']}. Iniciando Misión Cero.")
+            current_goal = planner.create_bootstrap_mission(goal, audit["missing_capabilities"])
+            is_bootstrap = True
+
+        telemetry.info(f"🚀 SwarmLauncher: Iniciando misión {'(BOOTSTRAP)' if is_bootstrap else ''} — {goal}")
 
         # --- Pre-Ignición: Telemetría de hardware ---
         hw_snapshot = self.hw_monitor.check_stability()
@@ -683,7 +693,13 @@ class SwarmLauncher:
             mode = "EFFICIENCY"
 
         # --- Construir topología ---
-        topology = build_topology_from_registry(goal, mode)
+        # En modo bootstrap, forzamos modo EFFICIENCY para que un solo arquitecto fabrique la herramienta
+        launch_mode = "EFFICIENCY" if is_bootstrap else mode
+        topology = build_topology_from_registry(current_goal, launch_mode)
+        
+        if is_bootstrap:
+            topology.mission_id += "_bootstrap"
+            
         topology.max_iterations = self.max_iterations
         mission_dir = MISSIONS_DIR / topology.mission_id
 
@@ -696,7 +712,9 @@ class SwarmLauncher:
         manifest = {
             "mission_id": topology.mission_id,
             "goal": goal,
-            "mode": mode,
+            "current_goal": current_goal,
+            "is_bootstrap": is_bootstrap,
+            "mode": launch_mode,
             "agents": [a.name for a in topology.agents],
             "created_at": time.time(),
             "hardware": hw_snapshot,
@@ -707,119 +725,132 @@ class SwarmLauncher:
         )
 
         env_vars = self._load_env_vars()
-        result: Dict[str, Any] = {"mission_id": topology.mission_id, "iterations": []}
+        result: Dict[str, Any] = {
+            "mission_id": topology.mission_id, 
+            "is_bootstrap": is_bootstrap,
+            "iterations": []
+        }
 
         # --- Ciclo iterativo ---
-        for iteration in range(self.max_iterations):
-            telemetry.info(f"📡 === ITERACIÓN {iteration + 1}/{self.max_iterations} ===")
+        tracer = get_tracer("swarm_launcher")
+        with tracer.start_as_current_span(
+            f"Mission: {topology.mission_id}", 
+            attributes={"mission_goal": goal, "mode": mode}
+        ):
+            for iteration in range(self.max_iterations):
+                telemetry.info(f"📡 === ITERACIÓN {iteration + 1}/{self.max_iterations} ===")
+                
+                # Inyectar contexto de traza en las variables de entorno
+                iteration_env = env_vars.copy()
+                propagate.get_global_textmap().inject(iteration_env)
 
-            # --- Hot Reload: Construir/Refrescar topología en cada iteración ---
-            topology = build_topology_from_registry(goal, mode)
-            topology.max_iterations = self.max_iterations
-            mission_dir = MISSIONS_DIR / topology.mission_id
+                # --- Hot Reload: Construir/Refrescar topología en cada iteración ---
+                topology = build_topology_from_registry(goal, mode)
+                topology.max_iterations = self.max_iterations
+                mission_dir = MISSIONS_DIR / topology.mission_id
 
-            # Asegurar estructura de directorios
-            (mission_dir / "reports").mkdir(parents=True, exist_ok=True)
-            (mission_dir / "brains").mkdir(parents=True, exist_ok=True)
-            (mission_dir / "logs").mkdir(parents=True, exist_ok=True)
+                # Asegurar estructura de directorios
+                (mission_dir / "reports").mkdir(parents=True, exist_ok=True)
+                (mission_dir / "brains").mkdir(parents=True, exist_ok=True)
+                (mission_dir / "logs").mkdir(parents=True, exist_ok=True)
 
-            # Limpiar señales previas
-            for signal_file in [
-                mission_dir / "consensus.lock",
-                mission_dir / "handoff_state.md",
-                mission_dir / "abort.signal",
-            ]:
-                if signal_file.exists():
-                    signal_file.unlink()
+                # Limpiar señales previas
+                for signal_file in [
+                    mission_dir / "consensus.lock",
+                    mission_dir / "handoff_state.md",
+                    mission_dir / "abort.signal",
+                ]:
+                    if signal_file.exists():
+                        signal_file.unlink()
 
-            # Leer historial destilado de iteración previa
-            distilled_history = ""
-            prev_handoff = mission_dir / f"handoff_iter_{iteration}.md"
-            if prev_handoff.exists():
-                distilled_history = prev_handoff.read_text(encoding="utf-8")
+                # Leer historial destilado de iteración previa
+                distilled_history = ""
+                prev_handoff = mission_dir / f"handoff_iter_{iteration}.md"
+                if prev_handoff.exists():
+                    distilled_history = prev_handoff.read_text(encoding="utf-8")
 
-            # Forjar cerebros (actualizado por iteración)
-            forge = BrainForge(mission_dir)
-            hw_now = self.hw_monitor.check_stability()
-            brain_paths: Dict[str, Path] = {}
-            for agent in topology.agents:
-                brain_paths[agent.name] = forge.forge(
-                    agent=agent,
-                    topology=topology,
+                # Forjar cerebros (actualizado por iteración)
+                forge = BrainForge(mission_dir)
+                hw_now = self.hw_monitor.check_stability()
+                brain_paths: Dict[str, Path] = {}
+                for agent in topology.agents:
+                    brain_paths[agent.name] = forge.forge(
+                        agent=agent,
+                        topology=topology,
+                        iteration=iteration,
+                        distilled_history=distilled_history,
+                        hardware_snapshot=hw_now,
+                    )
+
+                # Desplegar terminales paralelas
+                mux = TerminalMultiplexer(topology.mission_id)
+                for agent in topology.agents:
+                    mux.deploy_agent(
+                        agent=agent,
+                        runner_script=self.runner_script,
+                        brain_path=brain_paths[agent.name],
+                        env_vars=iteration_env,
+                    )
+
+                # Watchdog de consenso (con prevención de deadlock y limpieza de zombies)
+                agent_names = [a.name for a in topology.agents]
+                watchdog = ConsensusWatchdog(
+                    mission_dir=mission_dir,
+                    mission_id=topology.mission_id,
+                    agents_expected=agent_names,
+                    max_rounds_per_agent=topology.max_iterations,
+                    terminals=mux,
+                )
+                signal_result = await watchdog.watch(
+                    timeout=self.watchdog_timeout,
                     iteration=iteration,
-                    distilled_history=distilled_history,
-                    hardware_snapshot=hw_now,
                 )
 
-            # Desplegar terminales paralelas
-            mux = TerminalMultiplexer(topology.mission_id)
-            for agent in topology.agents:
-                mux.spawn(
-                    agent=agent,
-                    brain_path=brain_paths[agent.name],
-                    runner_script=self.runner_script,
-                    env_vars=env_vars,
-                )
+                # Recopilar estado de iteración
+                iter_data = {
+                    "iteration": iteration + 1,
+                    "signal": signal_result,
+                    "agents_active": mux.list_active(),
+                    "hw_status": hw_now["status"],
+                }
 
-            # Watchdog de consenso (con prevención de deadlock y limpieza de zombies)
-            agent_names = [a.name for a in topology.agents]
-            watchdog = ConsensusWatchdog(
-                mission_dir=mission_dir,
-                mission_id=topology.mission_id,
-                agents_expected=agent_names,
-                max_rounds_per_agent=topology.max_iterations,
-                terminals=mux,
-            )
-            signal_result = await watchdog.watch(
-                timeout=self.watchdog_timeout,
-                iteration=iteration,
-            )
+                # Capturar output de cada terminal antes de cerrar
+                for session in mux._sessions:
+                    output = mux.capture_output(session, lines=30)
+                    if output:
+                        log_path = mission_dir / "logs" / f"{session}_iter{iteration}.log"
+                        atomic_write(log_path, output)
 
-            # Recopilar estado de iteración
-            iter_data = {
-                "iteration": iteration + 1,
-                "signal": signal_result,
-                "agents_active": mux.list_active(),
-                "hw_status": hw_now["status"],
-            }
+                # Limpiar terminales
+                killed = mux.kill_all()
+                iter_data["terminals_killed"] = killed
+                result["iterations"].append(iter_data)
 
-            # Capturar output de cada terminal antes de cerrar
-            for session in mux._sessions:
-                output = mux.capture_output(session, lines=30)
-                if output:
-                    log_path = mission_dir / "logs" / f"{session}_iter{iteration}.log"
-                    atomic_write(log_path, output)
+                # Evaluar resultado
+                if signal_result == "consensus":
+                    telemetry.info("🏆 Consenso alcanzado. Misión completada.")
+                    result["status"] = "COMPLETED"
+                    result["final_consensus"] = safe_read(mission_dir / "consensus.lock")
+                    break
 
-            # Limpiar terminales
-            killed = mux.kill_all()
-            iter_data["terminals_killed"] = killed
-            result["iterations"].append(iter_data)
+                elif signal_result == "handoff":
+                    telemetry.info("🔄 Handoff detectado. Preparando re-iteración...")
+                    # Preservar handoff para la próxima iteración
+                    handoff_content = safe_read(mission_dir / "handoff_state.md")
+                    atomic_write(
+                        mission_dir / f"handoff_iter_{iteration + 1}.md",
+                        handoff_content,
+                    )
+                    continue
 
-            # Evaluar resultado
-            if signal_result == "consensus":
-                telemetry.info("🏆 Consenso alcanzado. Misión completada.")
-                result["status"] = "COMPLETED"
-                result["final_consensus"] = safe_read(mission_dir / "consensus.lock")
-                break
-
-            elif signal_result == "handoff":
-                telemetry.info("🔄 Handoff detectado. Preparando re-iteración...")
-                # Preservar handoff para la próxima iteración
-                handoff_content = safe_read(mission_dir / "handoff_state.md")
-                atomic_write(
-                    mission_dir / f"handoff_iter_{iteration + 1}.md",
-                    handoff_content,
-                )
-                continue
-
-            elif signal_result in ("timeout", "abort"):
-                telemetry.warning(f"⚠️ Misión terminada por {signal_result}.")
-                result["status"] = signal_result.upper()
-                break
-        else:
-            # Se agotaron las iteraciones sin consenso
-            result["status"] = "MAX_ITERATIONS_REACHED"
-            telemetry.warning("⚠️ Máximo de iteraciones alcanzado sin consenso.")
+                elif signal_result in ("timeout", "abort"):
+                    telemetry.warning(f"⚠️ Misión terminada por {signal_result}.")
+                    result["status"] = signal_result.upper()
+                    break
+            else:
+                # Se agotaron las iteraciones sin consenso
+                result["status"] = "MAX_ITERATIONS_REACHED"
+                telemetry.warning("⚠️ Máximo de iteraciones alcanzado sin consenso.")
 
         # Persistir resultado final
         atomic_write(

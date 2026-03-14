@@ -103,6 +103,7 @@ class DebateEvaluator:
     def is_stable(self) -> bool:
         """Detecta si el score ha convergido a un valor estable."""
         if len(self.history) < 2: return False
+        # Si hay un veto activo, nunca es estable para cerrar
         return abs(self.history[-1] - self.history[-2]) < 0.05
     def _collect_reports(self, reports_dir: Path) -> Dict[str, str]:
         """
@@ -212,17 +213,27 @@ class DebateEvaluator:
                 iteration=iteration,
             )
 
-        # 4. Calcular convergencia
+        # 4. Calcular convergencia (Heurísticas Guía 02)
         score = self.calculate_convergence(pro_text, adv_text)
+        
+        # 5. Aplicar Regla de Veto Absoluto (Guía 02)
+        active_veto = False
+        veto_reason = None
+        adv_upper = adv_text.upper()
+        if any(m in adv_upper for m in ("REJECTED", "VETO", "RIESGO CRÍTICO", "VULNERABILIDAD")):
+            active_veto = True
+            veto_reason = "Veto detectado en el reporte del Auditor/QA."
+            if score > 0.85:
+                score = 0.85 # Cap de seguridad Guía 02
 
-        # 5. Estabilidad
-        is_stable = self.is_stable()
+        # 6. Estabilidad
+        is_stable = self.is_stable() if not active_veto else False
 
-        # 6. Hardware
+        # 7. Hardware
         hw = self.hw_monitor.check_stability()
 
         # Síntesis
-        if score >= self.threshold and is_stable:
+        if score >= self.threshold and is_stable and not active_veto:
             status = "CONVERGED"
             analysis = (
                 f"Convergencia alcanzada (score={score:.4f} ≥ {self.threshold}). "
@@ -233,8 +244,11 @@ class DebateEvaluator:
             reasons = []
             if score < self.threshold:
                 reasons.append(f"score={score:.4f} < {self.threshold}")
-            if not is_stable:
+            if active_veto:
+                reasons.append(f"VETO ACTIVO: {veto_reason}")
+            elif not is_stable:
                 reasons.append("plateau no detectado")
+            
             if missing_agents:
                 reasons.append(f"agentes faltantes: {missing_agents}")
             analysis = f"Debate no converge: {'; '.join(reasons)}."

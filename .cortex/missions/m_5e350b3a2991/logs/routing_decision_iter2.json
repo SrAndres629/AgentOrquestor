@@ -1,9 +1,0 @@
-{
-  "mission_id": "m_5e350b3a2991",
-  "iteration": 3,
-  "status": "INCOMPLETE",
-  "convergence_score": 0.0,
-  "analysis": "Debate incompleto: sin adversario. Agentes faltantes: ninguno.",
-  "action": "HANDOFF",
-  "handoff_path": "/media/datasets/proyectos/Biblioteca MCP/AgentOrquestor/.cortex/missions/m_5e350b3a2991/handoff_state.md"
-}
