@@ -416,38 +416,131 @@ class TerminalMultiplexer:
 class ConsensusWatchdog:
     """
     Monitor asíncrono que espera señales de consenso o handoff.
-    Hace polling ligero del filesystem cada N segundos.
+    Hace polling ligero del filesystem + bus IPC cada N segundos.
     
-    Señales:
+    Señales de archivo:
       - consensus.lock  → misión completada con éxito
       - handoff_state.md → debate divergió, se requiere re-iteración
       - abort.signal     → cancelación manual / OOM
+    
+    Prevención de Deadlock:
+      Monitorea el bus IPC para contar las rondas completadas por
+      cada agente. Si TODOS los agentes agotan sus rondas máximas
+      sin que aparezca consensus.lock, el Watchdog auto-invoca al
+      HandoffRouter para forzar una decisión (SEAL o HANDOFF).
     """
 
-    def __init__(self, mission_dir: Path, poll_interval: float = 2.0):
+    def __init__(
+        self,
+        mission_dir: Path,
+        mission_id: str = "",
+        agents_expected: Optional[List[str]] = None,
+        max_rounds_per_agent: int = 3,
+        poll_interval: float = 2.0,
+    ):
         self.mission_dir = mission_dir
+        self.mission_id = mission_id or mission_dir.name
+        self.agents_expected = agents_expected or []
+        self.max_rounds = max_rounds_per_agent
         self.poll_interval = poll_interval
         self.consensus_path = mission_dir / "consensus.lock"
         self.handoff_path = mission_dir / "handoff_state.md"
         self.abort_path = mission_dir / "abort.signal"
+        self.bus_path = CORTEX_DIR / "bus_buffer.jsonl"
         self._cancelled = False
 
-    async def watch(self, timeout: float = 300.0) -> Literal["consensus", "handoff", "timeout", "abort"]:
+    def _count_agent_rounds(self) -> Dict[str, int]:
+        """
+        Lee el bus IPC y cuenta cuántos AGENT_REPORT ha emitido
+        cada agente para esta misión. Tolerante a líneas corruptas.
+        """
+        counts: Dict[str, int] = {name: 0 for name in self.agents_expected}
+        content = safe_read(self.bus_path)
+        if not content:
+            return counts
+
+        for line in content.strip().splitlines():
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if event.get("type") != "AGENT_REPORT":
+                continue
+            payload = event.get("payload", {})
+            if payload.get("mission_id") != self.mission_id:
+                continue
+            sender = event.get("sender", "")
+            if sender in counts:
+                counts[sender] += 1
+        return counts
+
+    def _all_agents_exhausted(self) -> bool:
+        """True si todos los agentes esperados han emitido >= max_rounds reportes."""
+        if not self.agents_expected:
+            return False
+        counts = self._count_agent_rounds()
+        return all(c >= self.max_rounds for c in counts.values())
+
+    async def _auto_invoke_handoff_router(self, iteration: int = 0) -> str:
+        """
+        Invoca al HandoffRouter para forzar una decisión cuando los
+        agentes agotan sus rondas sin consenso. Previene deadlock.
+        
+        Returns: "consensus" o "handoff" según el resultado del router.
+        """
+        telemetry.warning(
+            f"⚡ Watchdog: Todos los agentes agotaron {self.max_rounds} rondas. "
+            "Auto-invocando HandoffRouter para forzar decisión."
+        )
+        try:
+            from core.handoff_router import HandoffRouter
+            router = HandoffRouter()
+            result = router.evaluate_and_route(self.mission_id, iteration=iteration)
+            outcome = result.get("action", "HANDOFF")
+
+            if outcome == "SEALED":
+                telemetry.info("✅ Watchdog: HandoffRouter selló consenso automáticamente.")
+                return "consensus"
+            else:
+                telemetry.info("🔄 Watchdog: HandoffRouter generó handoff automático.")
+                return "handoff"
+        except Exception as e:
+            telemetry.error(f"❌ Watchdog: Error al invocar HandoffRouter: {e}")
+            # Fallback: generar handoff manual para evitar deadlock
+            handoff_content = (
+                f"# Handoff Automático (Generado por Watchdog)\n\n"
+                f"Motivo: Todos los agentes agotaron {self.max_rounds} rondas "
+                f"sin consenso y el HandoffRouter falló: {str(e)[:200]}\n\n"
+                f"Acción requerida: Re-evaluación manual.\n"
+            )
+            atomic_write(self.handoff_path, handoff_content)
+            return "handoff"
+
+    async def watch(
+        self,
+        timeout: float = 300.0,
+        iteration: int = 0,
+    ) -> Literal["consensus", "handoff", "timeout", "abort"]:
         """
         Espera hasta que se detecte una señal o expire el timeout.
+        Monitorea el bus para prevenir deadlock por agotamiento de rondas.
         
         Returns:
             "consensus" → debate convergió
-            "handoff"   → debate divergió, se requiere nueva iteración
+            "handoff"   → debate divergió o rondas agotadas
             "timeout"   → se excedió el timeout sin señal
             "abort"     → cancelación manual
         """
         start = time.monotonic()
-        telemetry.info(f"👁️  Watchdog: Monitoreando {self.mission_dir.name} (timeout={timeout}s)")
+        telemetry.info(
+            f"👁️  Watchdog: Monitoreando {self.mission_dir.name} "
+            f"(timeout={timeout}s, agentes={self.agents_expected}, max_rounds={self.max_rounds})"
+        )
 
         while not self._cancelled:
             elapsed = time.monotonic() - start
 
+            # 1. Señales de archivo (prioridad máxima)
             if self.consensus_path.exists():
                 telemetry.info("✅ Watchdog: consensus.lock detectado → Misión completada.")
                 return "consensus"
@@ -460,7 +553,23 @@ class ConsensusWatchdog:
                 telemetry.info("🛑 Watchdog: abort.signal detectado → Cancelación.")
                 return "abort"
 
+            # 2. Prevención de deadlock: ¿agotaron todos sus rondas?
+            if self.agents_expected and self._all_agents_exhausted():
+                return await self._auto_invoke_handoff_router(iteration)
+
+            # 3. Timeout global
             if elapsed >= timeout:
+                # Antes de dar timeout, intentar forzar decisión si hay reportes
+                if self.agents_expected:
+                    counts = self._count_agent_rounds()
+                    has_reports = any(c > 0 for c in counts.values())
+                    if has_reports:
+                        telemetry.warning(
+                            f"⏰ Watchdog: Timeout con reportes parciales. "
+                            f"Forzando evaluación: {counts}"
+                        )
+                        return await self._auto_invoke_handoff_router(iteration)
+
                 telemetry.warning(f"⏰ Watchdog: Timeout de {timeout}s excedido.")
                 return "timeout"
 
@@ -606,9 +715,18 @@ class SwarmLauncher:
                     env_vars=env_vars,
                 )
 
-            # Watchdog de consenso
-            watchdog = ConsensusWatchdog(mission_dir)
-            signal_result = await watchdog.watch(timeout=self.watchdog_timeout)
+            # Watchdog de consenso (con prevención de deadlock)
+            agent_names = [a.name for a in topology.agents]
+            watchdog = ConsensusWatchdog(
+                mission_dir=mission_dir,
+                mission_id=topology.mission_id,
+                agents_expected=agent_names,
+                max_rounds_per_agent=topology.max_iterations,
+            )
+            signal_result = await watchdog.watch(
+                timeout=self.watchdog_timeout,
+                iteration=iteration,
+            )
 
             # Recopilar estado de iteración
             iter_data = {

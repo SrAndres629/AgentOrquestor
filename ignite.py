@@ -1,46 +1,74 @@
+"""
+AgentOrquestor — Punto de Ignición Unificado v5.0
+===================================================
+Conecta la orden del usuario con el SwarmLauncher distribuido.
+
+Flujo:
+  1. Recibir objetivo del usuario (CLI o import)
+  2. Analizar situación (percepción)
+  3. Delegar al SwarmLauncher (actor model distribuido)
+
+Ya NO usa el grafo monolítico (graph.py). La ejecución ocurre
+en terminales tmux aisladas orquestadas por swarm_launcher.py.
+"""
+
 import sys
 import asyncio
-from core.state import AgentState
-from core.bootstrapper import bootstrapper
-from core.perception import perception
-from core.graph import heuristic_node, swarm_node, friction_node, debate_node, sandbox_node, routing_logic
 from core.telemetry import telemetry
+from core.perception import perception
+from core.swarm_launcher import SwarmLauncher
 
-async def execute_mission(goal: str):
+
+async def execute_mission(goal: str, mode: str = "DIALECTIC"):
+    """
+    Punto de entrada principal del enjambre distribuido.
+    
+    Args:
+        goal: Objetivo de la misión en lenguaje natural.
+        mode: DIALECTIC | EFFICIENCY | FULL_SWARM.
+              Se auto-degrada a EFFICIENCY si el hardware está crítico.
+    """
     telemetry.info(f"🚀 [IGNITE] Iniciando Misión OSAA v5.0: {goal}")
-    
-    # --- NIVEL COGNITIVO 0: PERCEPCIÓN ---
-    situational_context = perception.analyze_situation(goal)
-    
-    # --- NIVEL COGNITIVO 1: BOOTSTRAPPING ---
-    manifest = await bootstrapper.plan_mission(goal)
-    
-    # Inicializar Estado con el contexto de percepción
-    state = AgentState(
-        mission_goal=goal,
-        dtg_context={
-            "mission_id": manifest["mission_id"], 
-            "mode": manifest["mode"],
-            "perception": situational_context
-        }
+
+    # --- PERCEPCIÓN: Análisis situacional ---
+    try:
+        situational_context = perception.analyze_situation(goal)
+        detected_mode = situational_context.get("mode", mode)
+        telemetry.info(f"🔍 [IGNITE] Percepción: modo detectado = {detected_mode}")
+        # Usar el modo detectado si es más restrictivo
+        if detected_mode == "EFFICIENCY" and mode != "EFFICIENCY":
+            telemetry.info("⚠️ [IGNITE] Percepción recomienda EFFICIENCY. Aplicando.")
+            mode = "EFFICIENCY"
+    except Exception as e:
+        telemetry.warning(f"⚠️ [IGNITE] Percepción falló ({e}). Usando modo: {mode}")
+
+    # --- LANZAMIENTO: Delegar al enjambre distribuido ---
+    launcher = SwarmLauncher()
+    result = await launcher.launch(goal, mode)
+
+    status = result.get("status", "UNKNOWN")
+    mission_id = result.get("mission_id", "N/A")
+    iterations = len(result.get("iterations", []))
+
+    telemetry.info(
+        f"✨ [IGNITE] Misión {mission_id} finalizada — "
+        f"Status: {status}, Iteraciones: {iterations}"
     )
 
-    # Iniciar ciclo de vida
-    state = await heuristic_node(state)
-    
-    for _ in range(3):
-        state = await swarm_node(state)
-        state = await friction_node(state)
-        state = await debate_node(state)
-        
-        next_step = routing_logic(state)
-        if next_step == "sandbox":
-            state = await sandbox_node(state)
-            if state.is_stable: break
-        elif next_step == "end": break
-            
-    telemetry.info(f"✨ Misión finalizada. Modo empleado: {situational_context['mode']}")
+    return result
+
 
 if __name__ == "__main__":
     order = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Optimización Core"
-    asyncio.run(execute_mission(order))
+
+    # Soporte de modo por argumento: --mode DIALECTIC
+    mode = "DIALECTIC"
+    if "--mode" in sys.argv:
+        idx = sys.argv.index("--mode")
+        if idx + 1 < len(sys.argv):
+            mode = sys.argv[idx + 1].upper()
+            # Limpiar del order
+            order = order.replace(f"--mode {sys.argv[idx + 1]}", "").strip()
+
+    result = asyncio.run(execute_mission(order, mode))
+    print(f"\n📋 Resultado: {result.get('status', 'N/A')}")

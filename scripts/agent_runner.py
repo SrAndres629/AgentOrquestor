@@ -65,6 +65,7 @@ from core.swarm_launcher import (
 )
 from core.shredder import LogShredder
 from core.hardware_monitor import HardwareMonitor
+from core.mcp_proxy import mcp_proxy as global_mcp_proxy
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,7 @@ TURN_POLL_INTERVAL = 2.0           # Segundos entre polls de turno
 MAX_TURN_WAIT = 120.0              # Timeout máximo esperando turno
 INFERENCE_TIMEOUT = 60.0           # Timeout de llamada al LLM
 MAX_DEBATE_ROUNDS = 3              # Rondas máximas de debate interno
+MAX_TOOL_ROUNDS = 3                # Máx iteraciones tool_call por turno
 
 
 # ---------------------------------------------------------------------------
@@ -298,14 +300,17 @@ class TokenTracker:
 class LLMInferenceBridge:
     """
     Conecta el runner con la API de LLM del proveedor configurado.
+    Soporta Function Calling / Tool Use nativo de Groq y OpenRouter.
+    
+    Ciclo de inferencia con herramientas:
+      1. Enviar mensajes + definiciones de tools al LLM
+      2. Si el LLM responde con tool_calls → ejecutar vía MCPProxy
+      3. Inyectar resultados como mensajes "tool" y re-invocar LLM
+      4. Repetir hasta que el LLM emita texto final (o MAX_TOOL_ROUNDS)
     
     Proveedores soportados:
       - openrouter (OpenRouter API → Claude, Gemini, etc.)
       - groq (Groq API → Llama 3.3 70B)
-      
-    Estructura de producción: el cuerpo de la inferencia está
-    completo con manejo de errores, reintentos y parsing.
-    El único punto de extensión es la llamada HTTP real.
     """
 
     PROVIDER_ENDPOINTS = {
@@ -318,11 +323,13 @@ class LLMInferenceBridge:
         "groq": lambda: os.getenv("GROQ_API_KEY", ""),
     }
 
-    def __init__(self, provider: str, model: str):
+    def __init__(self, provider: str, model: str, mcp_proxy=None):
         self.provider = provider.lower()
         self.model = model
         self.endpoint = self.PROVIDER_ENDPOINTS.get(self.provider, "")
         self._api_key = self.PROVIDER_KEYS.get(self.provider, lambda: "")()
+        self.mcp = mcp_proxy or global_mcp_proxy
+        self._tool_calls_executed: List[Dict[str, Any]] = []
 
     def _build_messages(
         self,
@@ -348,6 +355,120 @@ class LLMInferenceBridge:
         messages.append({"role": "user", "content": current_task})
         return messages
 
+    def _build_tool_definitions(self, allowed_tools: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Convierte el catálogo de MCPProxy a formato OpenAI function-calling.
+        Filtra por herramientas permitidas en el cerebro del agente.
+        """
+        catalog = self.mcp.get_available_tools()
+        definitions = []
+
+        for tool in catalog:
+            name = tool["name"]
+            if allowed_tools and name not in allowed_tools:
+                continue
+
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": tool.get("desc", f"Herramienta MCP: {name}"),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "description": "Acción específica a ejecutar"
+                            },
+                            "target": {
+                                "type": "string",
+                                "description": "Objetivo o ruta de la acción"
+                            },
+                            "params": {
+                                "type": "object",
+                                "description": "Parámetros adicionales"
+                            },
+                        },
+                        "required": ["action"],
+                    },
+                },
+            })
+
+        return definitions
+
+    async def _execute_tool_calls(
+        self, tool_calls: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Ejecuta cada tool_call vía MCPProxy y retorna los resultados
+        como mensajes "tool" para re-inyectar al LLM.
+        """
+        results = []
+
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            tool_name = fn.get("name", "unknown")
+            tool_call_id = tc.get("id", f"tc_{int(time.time())}")
+
+            # Parsear argumentos (LLM los envía como JSON string)
+            try:
+                args = json.loads(fn.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+
+            telemetry.info(f"🔧 Tool Call: {tool_name}({json.dumps(args, ensure_ascii=False)[:200]})")
+
+            try:
+                mcp_result = await self.mcp.call_tool(tool_name, args)
+            except Exception as e:
+                mcp_result = {"status": "ERROR", "message": str(e)[:300]}
+
+            result_text = json.dumps(mcp_result, ensure_ascii=False)
+            telemetry.info(f"🔧 Tool Result [{tool_name}]: {result_text[:200]}")
+
+            # Registrar para traceability
+            self._tool_calls_executed.append({
+                "tool": tool_name,
+                "args": args,
+                "result": mcp_result,
+                "timestamp": time.time(),
+            })
+
+            # Mensaje de resultado para el LLM (formato OpenAI tool response)
+            results.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result_text,
+            })
+
+        return results
+
+    async def _raw_api_call(
+        self,
+        headers: Dict[str, str],
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Ejecuta una llamada HTTP al endpoint del LLM.
+        Retorna el JSON de respuesta parseado.
+        Raises en caso de error HTTP o de red.
+        """
+        import httpx
+
+        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
+            response = await client.post(
+                self.endpoint,
+                headers=headers,
+                json=payload,
+            )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+        return response.json()
+
     async def infer(
         self,
         system_prompt: str,
@@ -355,21 +476,29 @@ class LLMInferenceBridge:
         current_task: str,
         temperature: float = 0.2,
         max_tokens: int = 4096,
+        allowed_tools: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
-        Ejecuta la inferencia contra el proveedor LLM.
+        Ejecuta inferencia con soporte completo de Function Calling.
+        
+        Ciclo:
+          1. Enviar mensajes + tools al LLM
+          2. Si tool_calls → ejecutar → re-enviar con resultados
+          3. Repetir hasta texto final o MAX_TOOL_ROUNDS
         
         Returns:
             {
-                "content": str,        # Respuesta del LLM
-                "tokens_used": int,    # Tokens consumidos
-                "model": str,          # Modelo utilizado
-                "provider": str,       # Proveedor
-                "latency_ms": float,   # Latencia de la llamada
-                "status": "OK"|"ERROR"
+                "content": str,
+                "tokens_used": int,
+                "model": str,
+                "provider": str,
+                "latency_ms": float,
+                "status": "OK"|"ERROR"|"DIAGNOSTIC",
+                "tool_calls": List[Dict],  # Herramientas ejecutadas
             }
         """
         messages = self._build_messages(system_prompt, debate_history, current_task)
+        self._tool_calls_executed = []
 
         if not self._api_key:
             telemetry.warning(
@@ -382,64 +511,95 @@ class LLMInferenceBridge:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-
-        # Headers extra para OpenRouter
         if self.provider == "openrouter":
             headers["HTTP-Referer"] = "https://github.com/AgentOrquestor"
             headers["X-Title"] = "AgentOrquestor-Swarm-Runner"
 
-        payload = {
+        # Construir definiciones de herramientas
+        tool_defs = self._build_tool_definitions(allowed_tools)
+
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tool_defs:
+            payload["tools"] = tool_defs
+            payload["tool_choice"] = "auto"
 
         start_time = time.monotonic()
+        total_tokens = 0
 
         try:
-            import httpx
+            # --- Bucle de Tool Calling ---
+            for tool_round in range(MAX_TOOL_ROUNDS + 1):
+                data = await self._raw_api_call(headers, payload)
+                usage = data.get("usage", {})
+                total_tokens += usage.get("total_tokens", 0)
 
-            async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-                response = await client.post(
-                    self.endpoint,
-                    headers=headers,
-                    json=payload,
+                choice = data["choices"][0]
+                message = choice["message"]
+                finish_reason = choice.get("finish_reason", "stop")
+
+                # ¿El LLM solicita tool_calls?
+                tool_calls = message.get("tool_calls")
+
+                if tool_calls and tool_round < MAX_TOOL_ROUNDS:
+                    telemetry.info(
+                        f"🔧 [{self.provider}] {len(tool_calls)} tool_calls detectados "
+                        f"(ronda {tool_round + 1}/{MAX_TOOL_ROUNDS})"
+                    )
+
+                    # Agregar el mensaje del asistente con tool_calls
+                    messages.append(message)
+
+                    # Ejecutar herramientas y obtener resultados
+                    tool_results = await self._execute_tool_calls(tool_calls)
+                    messages.extend(tool_results)
+
+                    # Actualizar payload para la siguiente iteración
+                    payload["messages"] = messages
+                    continue
+
+                # Respuesta final (texto)
+                content = message.get("content", "")
+                if not content and tool_calls:
+                    # Último round fue tool_call sin texto → forzar cierre
+                    content = (
+                        f"[Auto-síntesis] Herramientas ejecutadas: "
+                        + ", ".join(tc["function"]["name"] for tc in tool_calls)
+                    )
+
+                latency = (time.monotonic() - start_time) * 1000
+
+                telemetry.info(
+                    f"✅ [{self.provider}/{self.model}] Inferencia OK — "
+                    f"{total_tokens} tokens, {latency:.0f}ms, "
+                    f"{len(self._tool_calls_executed)} tools ejecutados"
                 )
 
-            latency = (time.monotonic() - start_time) * 1000
-
-            if response.status_code != 200:
-                error_body = response.text[:500]
-                telemetry.error(
-                    f"❌ [{self.provider}] HTTP {response.status_code}: {error_body}"
-                )
                 return {
-                    "content": f"[ERROR] LLM respondió con HTTP {response.status_code}: {error_body}",
-                    "tokens_used": 0,
+                    "content": content,
+                    "tokens_used": total_tokens,
                     "model": self.model,
                     "provider": self.provider,
                     "latency_ms": latency,
-                    "status": "ERROR",
+                    "status": "OK",
+                    "tool_calls": self._tool_calls_executed,
                 }
 
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            usage = data.get("usage", {})
-            tokens = usage.get("total_tokens", len(content) // 4)
-
-            telemetry.info(
-                f"✅ [{self.provider}/{self.model}] Inferencia OK — "
-                f"{tokens} tokens, {latency:.0f}ms"
-            )
-
+            # Si agotamos MAX_TOOL_ROUNDS sin texto final
+            latency = (time.monotonic() - start_time) * 1000
+            telemetry.warning(f"⚠️ [{self.provider}] MAX_TOOL_ROUNDS agotados sin texto final.")
             return {
-                "content": content,
-                "tokens_used": tokens,
+                "content": "[WARN] Máximo de rondas de herramientas alcanzado sin síntesis final.",
+                "tokens_used": total_tokens,
                 "model": self.model,
                 "provider": self.provider,
                 "latency_ms": latency,
                 "status": "OK",
+                "tool_calls": self._tool_calls_executed,
             }
 
         except ImportError:
@@ -451,11 +611,12 @@ class LLMInferenceBridge:
             telemetry.error(f"❌ [{self.provider}] Excepción: {e}")
             return {
                 "content": f"[ERROR] Excepción durante inferencia: {str(e)[:300]}",
-                "tokens_used": 0,
+                "tokens_used": total_tokens,
                 "model": self.model,
                 "provider": self.provider,
                 "latency_ms": latency,
                 "status": "ERROR",
+                "tool_calls": self._tool_calls_executed,
             }
 
     def _diagnostic_response(self, messages: List[Dict]) -> Dict[str, Any]:
@@ -466,7 +627,6 @@ class LLMInferenceBridge:
         system_content = messages[0]["content"] if messages else ""
         task_content = messages[-1]["content"] if messages else ""
 
-        # Generar una respuesta estructurada basada en el rol detectado
         is_adversary = any(
             kw in system_content.lower()
             for kw in ("adversario", "auditor", "security", "crítica")
@@ -499,6 +659,7 @@ class LLMInferenceBridge:
             "provider": "local",
             "latency_ms": 0.0,
             "status": "DIAGNOSTIC",
+            "tool_calls": [],
         }
 
 
