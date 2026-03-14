@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSAA War Room — Panóptico Táctico v6.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111827; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+        .agent-card { transition: all 0.3s ease; }
+        .agent-card:hover { transform: translateX(5px); }
+    </style>
+</head>
+<body class="bg-black text-gray-100 font-mono overflow-hidden">
+    <div class="grid grid-cols-12 h-screen w-full">
+        
+        <!-- Columna Izquierda: Radar de Vida (20%) -->
+        <aside class="col-span-2 border-r border-gray-800 bg-gray-900/50 p-4 flex flex-col h-full">
+            <header class="mb-6">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-gray-800 pb-2">Radar de Agentes</h2>
+            </header>
+            <div id="agent-list" class="space-y-3 overflow-y-auto flex-1 pr-2">
+                <!-- Agentes inyectados dinámicamente -->
+                <div class="text-xs text-gray-600 italic">Escaneando tmux...</div>
+            </div>
+            <footer class="mt-4 pt-4 border-t border-gray-800">
+                <div class="flex items-center space-x-2 text-[10px] text-gray-500">
+                    <span id="ws-status-dot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                    <span id="ws-status-text">OFFLINE</span>
+                </div>
+            </footer>
+        </aside>
+
+        <!-- Columna Central: El Flujo Sanguíneo (50%) -->
+        <main class="col-span-6 flex flex-col h-full bg-black relative">
+            <header class="p-4 border-b border-gray-800 bg-gray-900/20 flex justify-between items-center">
+                <h2 class="text-sm font-bold text-blue-400">COMMAND FEED — .cortex/bus</h2>
+                <span class="text-[10px] text-gray-600">OSAA v6.0 PROTOCOL ACTIVE</span>
+            </header>
+            
+            <div id="chat-feed" class="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth">
+                <!-- Eventos iniciales -->
+                <div class="text-xs text-gray-700 bg-gray-900/50 p-3 border border-gray-800 rounded">
+                    Esperando ignición del enjambre...
+                </div>
+            </div>
+
+            <!-- Terminal de Intervención (Human Override) -->
+            <footer class="p-4 bg-gray-900/80 border-t border-gray-800">
+                <div class="flex space-x-2">
+                    <span class="text-blue-500 font-bold self-center">❯</span>
+                    <input type="text" id="override-input" 
+                           class="flex-1 bg-transparent border-none text-sm focus:ring-0 placeholder-gray-700" 
+                           placeholder="Inyectar comando al bus (Human Override)...">
+                    <button id="send-btn" class="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded transition-colors uppercase font-bold">Inyectar</button>
+                </div>
+            </footer>
+        </main>
+
+        <!-- Columna Derecha: El Microscopio (30%) -->
+        <aside class="col-span-4 border-l border-gray-800 bg-gray-900/50 p-4 flex flex-col h-full">
+            <header class="mb-4">
+                <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest border-b border-gray-800 pb-2">Telemetría de Detalle</h2>
+            </header>
+            <div id="inspector-panel" class="flex-1 overflow-y-auto text-[11px] font-mono pr-2">
+                <pre id="json-viewer" class="text-green-500 whitespace-pre-wrap opacity-60">Selecciona un evento en el feed central para ver su ADN...</pre>
+            </div>
+            <div class="mt-4 p-3 bg-red-900/10 border border-red-900/30 rounded">
+                <h3 class="text-[10px] font-bold text-red-500 uppercase mb-1">Alertas Criticas</h3>
+                <div id="alert-log" class="text-[9px] text-red-400/80 italic">Sistema estable. No hay brechas detectadas.</div>
+            </div>
+        </aside>
+
+    </div>
+
+    <script>
+        const chatFeed = document.getElementById('chat-feed');
+        const agentList = document.getElementById('agent-list');
+        const jsonViewer = document.getElementById('json-viewer');
+        const wsStatusDot = document.getElementById('ws-status-dot');
+        const wsStatusText = document.getElementById('ws-status-text');
+        const overrideInput = document.getElementById('override-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        let ws;
+        let reconnectTimeout;
+
+        function connect() {
+            ws = new WebSocket('ws://localhost:8000/ws/feed');
+
+            ws.onopen = () => {
+                wsStatusDot.classList.replace('bg-red-500', 'bg-green-500');
+                wsStatusText.innerText = 'ONLINE';
+                console.log('🔗 WebSocket conectado.');
+                clearTimeout(reconnectTimeout);
+            };
+
+            ws.onmessage = (event) => {
+                const payload = JSON.parse(event.data);
+                if (payload.type === 'TMUX_STATUS') {
+                    updateAgentList(payload.data);
+                } else if (payload.type === 'BUS_EVENT') {
+                    renderBusEvent(payload.data);
+                }
+            };
+
+            ws.onclose = () => {
+                wsStatusDot.classList.replace('bg-green-500', 'bg-red-500');
+                wsStatusText.innerText = 'OFFLINE';
+                console.warn('🔌 Conexión perdida. Reintentando en 3s...');
+                reconnectTimeout = setTimeout(connect, 3000);
+            };
+        }
+
+        function updateAgentList(agents) {
+            if (agents.length === 0) {
+                agentList.innerHTML = '<div class="text-[10px] text-gray-700 italic">No hay agentes en tmux.</div>';
+                return;
+            }
+            agentList.innerHTML = agents.map(agent => `
+                <div class="agent-card p-2 bg-gray-800/40 border border-gray-700/50 rounded flex items-center justify-between">
+                    <span class="text-xs text-blue-300 font-bold">${agent.session_name}</span>
+                    <span class="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]"></span>
+                </div>
+            `).join('');
+        }
+
+        function renderBusEvent(data) {
+            const div = document.createElement('div');
+            const sender = data.sender || 'Unknown';
+            const roleColor = getRoleColor(sender);
+            
+            div.className = "group border-l-2 bg-gray-900/30 p-3 cursor-pointer hover:bg-gray-800/50 transition-colors";
+            div.style.borderColor = roleColor;
+            
+            div.onclick = () => {
+                jsonViewer.innerText = JSON.stringify(data, null, 2);
+                jsonViewer.classList.remove('opacity-60');
+            };
+
+            const content = data.content || data.report || data.message || JSON.stringify(data);
+            const shortContent = content.length > 500 ? content.substring(0, 500) + '...' : content;
+
+            div.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-[10px] font-black uppercase" style="color: ${roleColor}">${sender}</span>
+                    <span class="text-[8px] text-gray-600">${new Date().toLocaleTimeString()}</span>
+                </div>
+                <div class="text-xs text-gray-300 leading-relaxed">${shortContent}</div>
+            `;
+
+            chatFeed.appendChild(div);
+            chatFeed.scrollTop = chatFeed.scrollHeight;
+        }
+
+        function getRoleColor(sender) {
+            const s = sender.toLowerCase();
+            if (s.includes('lead')) return '#60A5FA'; // Azul
+            if (s.includes('security') || s.includes('auditor')) return '#F87171'; // Rojo
+            if (s.includes('watchdog')) return '#FBBF24'; // Amarillo
+            if (s.includes('human')) return '#A78BFA'; // Violeta
+            if (s.includes('system')) return '#10B981'; // Verde
+            return '#9CA3AF'; // Gris
+        }
+
+        function sendOverride() {
+            const msg = overrideInput.value.trim();
+            if (!msg || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const payload = {
+                type: 'override',
+                sender: 'Human_Operator',
+                content: msg,
+                timestamp: Date.now() / 1000
+            };
+
+            ws.send(JSON.stringify(payload));
+            overrideInput.value = '';
+            renderBusEvent(payload); // Echo local
+        }
+
+        overrideInput.onkeydown = (e) => { if (e.key === 'Enter') sendOverride(); };
+        sendBtn.onclick = sendOverride;
+
+        // Ignición
+        connect();
+    </script>
+</body>
+</html>
