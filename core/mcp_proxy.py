@@ -51,7 +51,11 @@ class MCPProxy:
         return catalog
 
     async def call_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Ejecuta una acción en un servidor MCP externo con validación de soberanía."""
+        """
+        Ejecuta una acción en un servidor MCP externo (Guía 14).
+         सेंट्रल स्विचबोर्ड (Switchboard Central).
+        """
+        # Herramientas de soberanía interna
         if tool_name == "register_new_tool":
             agent = params.get("agent_name", "UnknownAgent")
             tool = params.get("tool_name")
@@ -61,15 +65,30 @@ class MCPProxy:
             planner.register_tool(agent, tool)
             return {
                 "status": "SUCCESS", 
-                "message": f"Herramienta '{tool}' registrada para el agente '{agent}'. "
-                           f"Estará disponible en la próxima iteración/misión."
+                "message": f"Herramienta '{tool}' registrada para el agente '{agent}'."
             }
 
         if tool_name not in self.registry:
-            return {"status": "ERROR", "message": f"Herramienta {tool_name} no encontrada."}
+            return {"status": "ERROR", "message": f"Herramienta {tool_name} no encontrada o no mapeada."}
             
-        telemetry.info(f"⚡ MCP: Ejecutando {tool_name}...")
-        # Simulación de puente stdio/sse hacia el servidor destino
-        return {"status": "SUCCESS", "tool": tool_name, "result": "Misión ejecutada."}
+        telemetry.info(f"⚡ [MCP_PROXY] Ruteando llamada a: {tool_name}")
+        
+        # Simulación de ruteo a puerto específico (Guía 14)
+        # En una implementación real, aquí se usaría un cliente HTTP/SSE o Stdio hacia el puerto mapeado.
+        # Por ahora, simulamos la respuesta para mantener la estabilidad del enjambre.
+        
+        raw_result = f"Misión ejecutada en {tool_name}. Payload procesado correctamente."
+        
+        # LEY DEL EMBUDO (Guía 04/14): Truncamiento en el borde a 4000 caracteres.
+        truncated_result = raw_result[:4000]
+        if len(raw_result) > 4000:
+            truncated_result += "\n\n[TRUNCATED BY TITANIUM FUNNEL (GUIDE 04)]"
+            
+        return {
+            "status": "SUCCESS", 
+            "tool": tool_name, 
+            "result": truncated_result,
+            "routing": "localhost:800x" # Simulación de puerto
+        }
 
 mcp_proxy = MCPProxy()

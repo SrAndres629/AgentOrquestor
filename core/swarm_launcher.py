@@ -404,11 +404,18 @@ class TerminalMultiplexer:
         return False
 
     def kill_all(self) -> int:
-        """Termina todas las sesiones del enjambre actual."""
+        """
+        Termina todas las sesiones del enjambre actual.
+        Implementa Protocolo del Sepulturero (Guía 08).
+        """
         killed = 0
         for session in self._sessions:
             if self.kill_session(session):
                 killed += 1
+        
+        # Limpieza profunda de zombis (Guía 08)
+        self.hw_monitor.purge_zombies(mission_id=self.mission_id)
+        
         self._sessions.clear()
         return killed
 

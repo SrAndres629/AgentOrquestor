@@ -51,23 +51,42 @@ class EventBus:
         
         telemetry.info(f"📡 MAILBOX [{sender}]: {event_type} persistido.")
 
-    def read_mailbox(self, agent_name: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Lee los últimos eventos del buzón de un agente específico."""
+    def read_mailbox(self, agent_name: str, limit: int = 10) -> List[Dict[ Any]]:
+        """
+        Lee los últimos eventos del buzón de un agente específico.
+        Implementa el Botón del Pánico (Guía 15) ante corrupción.
+        """
         path = self._get_mailbox_path(agent_name)
         if not os.path.exists(path):
             return []
             
         events = []
-        with open(path, "r", encoding="utf-8") as f:
-            # Para eficiencia en archivos grandes, podríamos usar búsqueda desde el final,
-            # pero por ahora leemos las últimas N líneas.
-            lines = f.readlines()
-            for line in lines[-limit:]:
-                try:
-                    events.append(json.loads(line))
-                except:
-                    continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                for line in lines[-limit:]:
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        # Protocolo de Desastres (Guía 15)
+                        telemetry.error(f"🚨 [PANIC BUTTON] Corrupción detectada en {path}. Iniciando recuperación.")
+                        self._handle_corrupted_bus(path)
+                        return [] # Reintentar tras recuperación sería lo ideal, pero por ahora cortamos.
+        except Exception as e:
+            telemetry.error(f"❌ Error crítico leyendo buzón {agent_name}: {e}")
+            
         return events
+
+    def _handle_corrupted_bus(self, path: str):
+        """Maneja la corrupción moviendo el archivo y notificando al Chronicler."""
+        backup_path = path + f".corrupt_{int(time.time())}.bak"
+        try:
+            os.rename(path, backup_path)
+            telemetry.warning(f"📦 Backup de bus corrupto creado en {backup_path}")
+            # El Chronicler (Guide 05) debería actuar aquí, pero por ahora instanciamos vacío
+            with open(path, "w") as f: f.write("")
+        except Exception as e:
+            telemetry.error(f"💀 Fallo catastrófico en recuperación de desastres: {e}")
 
     def read_all_events(self, limit_per_actor: int = 5) -> List[Dict[str, Any]]:
         """Agrega eventos de todos los buzones (usado por el Watchdog)."""

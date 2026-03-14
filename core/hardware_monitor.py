@@ -50,6 +50,29 @@ class HardwareMonitor:
             "action": "PROCEED" if is_safe else "THROTTLE"
         }
 
+    def purge_zombies(self, mission_id: Optional[str] = None):
+        """
+        Protocolo del Sepulturero (Guía 08).
+        Liquida sesiones tmux huérfanas o específicas para liberar VRAM/RAM.
+        """
+        try:
+            # Listar sesiones
+            cmd_list = "tmux list-sessions -F #S"
+            sessions = subprocess.check_output(cmd_list.split(), stderr=subprocess.DEVNULL).decode('utf-8').strip().split('\n')
+            
+            for s in sessions:
+                # Si se especifica mission_id, solo matamos las de esa misión
+                # De lo contrario, limpiamos todo el prefijo 'osaa'
+                if mission_id:
+                    if mission_id in s:
+                        telemetry.warning(f"💀 [SEPULTURERO] Enterrando sesión zombi: {s}")
+                        subprocess.run(["tmux", "kill-session", "-t", s])
+                elif s.startswith("osaa"):
+                    telemetry.warning(f"💀 [SEPULTURERO] Limpieza general de sesión: {s}")
+                    subprocess.run(["tmux", "kill-session", "-t", s])
+        except Exception:
+            pass # No hay sesiones tmux activas
+
 if __name__ == "__main__":
     monitor = HardwareMonitor()
     print(json.dumps(monitor.check_stability(), indent=2))

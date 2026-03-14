@@ -74,6 +74,7 @@ from core.neural_trace import (
     NeuralSpan, 
     extract_trace_context
 )
+from core.constitution import get_global_directives
 
 
 # ---------------------------------------------------------------------------
@@ -332,12 +333,13 @@ class LLMInferenceBridge:
     ) -> List[Dict[str, str]]:
         """
         Construye el array de mensajes OpenAI-compatible.
-        
-        [0] system → Cerebro del agente (system prompt inmutable)
-        [1..N-1] user/assistant → Historial del debate (destilado)
-        [N] user → Tarea actual / turno del debate
+        Inyecta la Constitución Global OSAA v6.0.
         """
-        messages = [{"role": "system", "content": system_prompt}]
+        # Inyectar directivas constitucionales según el rol
+        constitution = get_global_directives(self.agent_name)
+        full_system_prompt = f"{constitution}\n\n{system_prompt}"
+        
+        messages = [{"role": "system", "content": full_system_prompt}]
 
         for entry in debate_history:
             role = entry.get("role", "user")
