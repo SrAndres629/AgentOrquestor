@@ -2,6 +2,7 @@ import os
 import json
 from typing import List, Dict, Any
 from core.telemetry import telemetry
+from core.mission_planner import planner
 
 class MCPProxy:
     """
@@ -40,10 +41,30 @@ class MCPProxy:
 
     def get_available_tools(self) -> List[Dict[str, str]]:
         """Genera el catálogo para el prompt del sistema de agentes."""
-        return [{"name": k, "desc": v["description"]} for k, v in self.registry.items()]
+        catalog = [{"name": k, "desc": v["description"]} for k, v in self.registry.items()]
+        
+        # Herramientas de soberanía (siempre disponibles)
+        catalog.append({
+            "name": "register_new_tool",
+            "desc": "Registra una nueva herramienta (MCP o Skill) en el sistema para que sea usable en futuras misiones."
+        })
+        return catalog
 
     async def call_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Ejecuta una acción en un servidor MCP externo con validación de soberanía."""
+        if tool_name == "register_new_tool":
+            agent = params.get("agent_name", "UnknownAgent")
+            tool = params.get("tool_name")
+            if not tool:
+                return {"status": "ERROR", "message": "Falta parámetro 'tool_name'."}
+            
+            planner.register_tool(agent, tool)
+            return {
+                "status": "SUCCESS", 
+                "message": f"Herramienta '{tool}' registrada para el agente '{agent}'. "
+                           f"Estará disponible en la próxima iteración/misión."
+            }
+
         if tool_name not in self.registry:
             return {"status": "ERROR", "message": f"Herramienta {tool_name} no encontrada."}
             

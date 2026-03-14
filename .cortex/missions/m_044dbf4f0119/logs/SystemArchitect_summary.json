@@ -1,8 +1,8 @@
 {
   "agent": "SystemArchitect",
   "role": "architect",
-  "rounds_completed": 1,
+  "rounds_completed": 0,
   "consensus_reached": false,
-  "total_tokens": 1532,
+  "total_tokens": 0,
   "status": "COMPLETED"
 }

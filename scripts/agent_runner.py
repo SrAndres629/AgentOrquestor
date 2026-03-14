@@ -43,6 +43,7 @@ import signal
 import asyncio
 import argparse
 import hashlib
+import traceback
 from typing import Dict, Any, List, Optional, Literal
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -365,7 +366,35 @@ class LLMInferenceBridge:
 
         for tool in catalog:
             name = tool["name"]
-            if allowed_tools and name not in allowed_tools:
+            
+            # Herramientas de soberanía siempre visibles
+            is_sovereign = name == "register_new_tool"
+            
+            if not is_sovereign and allowed_tools and name not in allowed_tools:
+                continue
+            
+            if name == "register_new_tool":
+                definitions.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": tool["desc"],
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "agent_name": {
+                                    "type": "string",
+                                    "description": "Nombre del agente al que se le asignará la herramienta (ej. LeadDeveloper)"
+                                },
+                                "tool_name": {
+                                    "type": "string",
+                                    "description": "Nombre técnico de la nueva herramienta/skill"
+                                }
+                            },
+                            "required": ["agent_name", "tool_name"],
+                        },
+                    },
+                })
                 continue
 
             definitions.append({
@@ -1156,7 +1185,29 @@ async def main():
         agent_name=args.agent_name,
     )
 
-    result = await runner.run()
+    try:
+        result = await runner.run()
+    except Exception as e:
+        # --- EL GRITO DE MUERTE (Death Rattle) ---
+        from core.event_bus import bus
+        telemetry.error(f"💥 [FATAL] {args.agent_name} colapsó: {e}")
+        
+        fatal_event = {
+            "timestamp": time.time(),
+            "sender": args.agent_name,
+            "type": "AGENT_FATAL_ERROR",
+            "payload": {
+                "mission_id": args.mission_id,
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+        }
+        try:
+            bus.write_event(fatal_event)
+        except:
+            pass # No podemos hacer mucho más si el bus también falla
+            
+        sys.exit(1)
 
     # Exit code: 0 = OK, 1 = error, 2 = shutdown
     if result["status"] == "ERROR":

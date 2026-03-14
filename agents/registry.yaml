@@ -31,16 +31,15 @@ agents:
     tools:
     - git_read
     - file_analysis
-    - chronicler_query
   Lead_Developer:
     name: LeadDeveloper
     description: "Implementador con Autocuraci\xF3n y Resiliencia de Cuota."
     provider: groq
     model: llama-3.3-70b-versatile
-    system_message: "Eres el Desarrollador L\xEDder.\nImplementas c\xF3digo modular\
+    system_message: "Eres el Desarrollador Líder.\nImplementas código modular\
       \ con la velocidad de Groq.\nDebes realizar 'Rubber Ducking' antes de escribir:\
-      \ explica tu c\xF3digo al 'Pato de Goma' para detectar errores l\xF3gicos antes\
-      \ de enviar al Sandbox.\n"
+      \ explica tu código al 'Pato de Goma' para detectar errores lógicos antes\
+      \ de ejecutar.\n"
     tools:
     - file_write
     - shell_execute

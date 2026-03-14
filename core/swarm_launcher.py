@@ -578,6 +578,17 @@ class ConsensusWatchdog:
                 telemetry.info("🛑 Watchdog: abort.signal detectado → Cancelación.")
                 return "abort"
 
+            # 1.1. Intercepción de Fatalidad (Death Rattle)
+            from core.event_bus import bus
+            last_events = bus.read_last_n(5)
+            for event in last_events:
+                if event.get("type") == "AGENT_FATAL_ERROR":
+                    sender = event.get("sender", "Unknown")
+                    err_msg = event.get("payload", {}).get("error", "Error desconocido")
+                    telemetry.error(f"💀 Watchdog: ¡MUERTE DETECTADA! Agente {sender} colapsó: {err_msg}")
+                    telemetry.warning("🔄 Abortando espera y forzando re-iteración inmediata.")
+                    return "handoff"
+
             # 2. Prevención de deadlock: ¿agotaron todos sus rondas?
             if self.agents_expected and self._all_agents_exhausted():
                 return await self._auto_invoke_handoff_router(iteration)

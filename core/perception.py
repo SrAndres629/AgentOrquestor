@@ -69,8 +69,7 @@ class PerceptionNode:
     def _define_critical_variables(self, goal: str) -> List[str]:
         """Encuadre: Identifica sobre qué debe enfocarse el agente."""
         variables = ["Estabilidad VRAM", "Consistencia del Event Bus"]
-        if "chronicler" in goal.lower(): variables.append("Integridad de Memoria")
-        if "sandbox" in goal.lower(): variables.append("Seguridad de Ejecución")
+        if "registry" in goal.lower(): variables.append("Integridad de Herramientas")
         return variables
 
 perception = PerceptionNode()

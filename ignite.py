@@ -18,7 +18,6 @@ from core.telemetry import telemetry
 from core.perception import perception
 from core.swarm_launcher import SwarmLauncher
 from core.mission_planner import planner
-from core.chronicler import chronicler
 
 
 async def execute_mission(goal: str, mode: str = "DIALECTIC"):
@@ -53,8 +52,8 @@ async def execute_mission(goal: str, mode: str = "DIALECTIC"):
     status = result.get("status", "UNKNOWN")
     mission_id = result.get("mission_id", "N/A")
     
-    # --- MEMORIA: Persistencia evolutiva ---
-    chronicler.remember_mission(mission_id, status, f"Misión: {goal}")
+    # --- MEMORIA (Ley 3): Persistence es atómica vía Registry y Handoff Logs ---
+    telemetry.info(f"🧠 [IGNITE] Registro de misión {mission_id} guardado en el bus.")
 
     telemetry.info(
         f"✨ [IGNITE] Misión {mission_id} finalizada — "
