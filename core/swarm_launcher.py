@@ -197,6 +197,7 @@ class BrainForge:
     """
 
     def __init__(self, mission_dir: Path):
+        self.mission_dir = mission_dir
         self.brains_dir = mission_dir / "brains"
         self.brains_dir.mkdir(parents=True, exist_ok=True)
         self.shredder = LogShredder()
@@ -242,6 +243,19 @@ class BrainForge:
         peers = [a.name for a in topology.agents if a.name != agent.name]
         peers_str = ", ".join(peers) if peers else "(Solo)"
 
+        # 0. Ingesta de Handoff (Continuidad Autónoma)
+        handoff_section = ""
+        prev_handoff = self.mission_dir / "handoff_state.md"
+        if prev_handoff.exists():
+            handoff_data = safe_read(prev_handoff)
+            if handoff_data:
+                handoff_section = (
+                    f"## <previous_iteration_lessons>\n"
+                    f"Aprende de los errores de la iteración previa antes de actuar:\n"
+                    f"```markdown\n{handoff_data[:2000]}\n```\n"
+                    f"</previous_iteration_lessons>\n\n"
+                )
+
         content = (
             f"# Cerebro del Agente: {agent.name}\n"
             f"## Misión: {topology.mission_goal}\n"
@@ -251,6 +265,7 @@ class BrainForge:
             f"---\n\n"
             f"## Directiva de Sistema\n"
             f"{agent.system_message}\n\n"
+            f"{handoff_section}"
             f"## Protocolo de Comunicación IPC\n"
             f"- Escribe tu reporte en: `.cortex/missions/{topology.mission_id}/reports/{agent.name}_report.md`\n"
             f"- Lee reportes de pares en: `.cortex/missions/{topology.mission_id}/reports/`\n"

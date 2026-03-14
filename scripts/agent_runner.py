@@ -454,25 +454,49 @@ class LLMInferenceBridge:
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Ejecuta una llamada HTTP al endpoint del LLM.
-        Retorna el JSON de respuesta parseado.
-        Raises en caso de error HTTP o de red.
+        Ejecuta una llamada HTTP al endpoint del LLM con Resiliencia Metabólica (Backoff).
+        Implementa reintentos exponenciales para errores 429 (Rate Limit).
         """
         import httpx
+        import random
+        
+        max_retries = 5
+        base_delay = 2.0  # s
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
+                    response = await client.post(
+                        self.endpoint,
+                        headers=headers,
+                        json=payload,
+                    )
 
-        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-            response = await client.post(
-                self.endpoint,
-                headers=headers,
-                json=payload,
-            )
+                if response.status_code == 200:
+                    return response.json()
+                
+                if response.status_code == 429:
+                    delay = (base_delay * (2 ** attempt)) + (random.random() * 2.0)
+                    telemetry.warning(
+                        f"⏳ [{self.provider}] Rate Limit (429). Reintentando en {delay:.1f}s... "
+                        f"(Intento {attempt + 1}/{max_retries})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                
+                # Otros errores HTTP
+                raise RuntimeError(
+                    f"HTTP {response.status_code}: {response.text[:500]}"
+                )
 
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"HTTP {response.status_code}: {response.text[:500]}"
-            )
+            except httpx.RequestError as e:
+                if attempt == max_retries - 1:
+                    raise
+                delay = base_delay * (attempt + 1)
+                telemetry.error(f"🌐 Error de red: {e}. Reintentando en {delay}s...")
+                await asyncio.sleep(delay)
 
-        return response.json()
+        raise RuntimeError(f"❌ [{self.provider}] Max retries exceeded for 429 errors.")
 
     async def infer(
         self,

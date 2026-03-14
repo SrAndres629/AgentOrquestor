@@ -17,27 +17,31 @@ import asyncio
 from core.telemetry import telemetry
 from core.perception import perception
 from core.swarm_launcher import SwarmLauncher
+from core.mission_planner import planner
+from core.chronicler import chronicler
 
 
 async def execute_mission(goal: str, mode: str = "DIALECTIC"):
     """
-    Punto de entrada principal del enjambre distribuido.
-    
-    Args:
-        goal: Objetivo de la misión en lenguaje natural.
-        mode: DIALECTIC | EFFICIENCY | FULL_SWARM.
-              Se auto-degrada a EFFICIENCY si el hardware está crítico.
+    Punto de entrada evolutivo del enjambre distribuido.
     """
     telemetry.info(f"🚀 [IGNITE] Iniciando Misión OSAA v5.0: {goal}")
+
+    # --- AUDITORÍA DE CAPACIDADES (Evolución Autónoma) ---
+    audit = planner.audit_capabilities(goal)
+    if audit.get("bootstrap_needed"):
+        telemetry.warning("🏗️ [IGNITE] Iniciando Misión Cero (Autofabricación)...")
+        bootstrap_goal = planner.create_bootstrap_mission(goal, audit["missing_capabilities"])
+        launcher = SwarmLauncher()
+        await launcher.launch(bootstrap_goal, mode="EFFICIENCY") # Bootstrap suele ser ligero
+        telemetry.info("✅ [IGNITE] Misión Cero completada. Procediendo a Misión Principal con arsenal actualizado.")
 
     # --- PERCEPCIÓN: Análisis situacional ---
     try:
         situational_context = perception.analyze_situation(goal)
         detected_mode = situational_context.get("mode", mode)
-        telemetry.info(f"🔍 [IGNITE] Percepción: modo detectado = {detected_mode}")
-        # Usar el modo detectado si es más restrictivo
+        # ... logic remains same ...
         if detected_mode == "EFFICIENCY" and mode != "EFFICIENCY":
-            telemetry.info("⚠️ [IGNITE] Percepción recomienda EFFICIENCY. Aplicando.")
             mode = "EFFICIENCY"
     except Exception as e:
         telemetry.warning(f"⚠️ [IGNITE] Percepción falló ({e}). Usando modo: {mode}")
@@ -48,11 +52,13 @@ async def execute_mission(goal: str, mode: str = "DIALECTIC"):
 
     status = result.get("status", "UNKNOWN")
     mission_id = result.get("mission_id", "N/A")
-    iterations = len(result.get("iterations", []))
+    
+    # --- MEMORIA: Persistencia evolutiva ---
+    chronicler.remember_mission(mission_id, status, f"Misión: {goal}")
 
     telemetry.info(
         f"✨ [IGNITE] Misión {mission_id} finalizada — "
-        f"Status: {status}, Iteraciones: {iterations}"
+        f"Status: {status}"
     )
 
     return result
