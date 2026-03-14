@@ -306,6 +306,10 @@ class TerminalMultiplexer:
     SESSION_PREFIX = "osaa"
 
     def __init__(self, mission_id: str):
+        from core.hardware_monitor import HardwareMonitor
+        self.hw_monitor = HardwareMonitor()
+        from core.hardware_monitor import HardwareMonitor
+        self.hw_monitor = HardwareMonitor()
         self.mission_id = mission_id
         self._sessions: List[str] = []
 
@@ -709,6 +713,8 @@ class SwarmLauncher:
             
         topology.max_iterations = self.max_iterations
         mission_dir = MISSIONS_DIR / topology.mission_id
+        print(f"DEBUG: mission_dir={mission_dir}")
+        print(f"DEBUG: mission_dir={mission_dir}")
 
         # Crear estructura de directorios de la misión
         (mission_dir / "reports").mkdir(parents=True, exist_ok=True)
@@ -752,7 +758,7 @@ class SwarmLauncher:
                 propagate.get_global_textmap().inject(iteration_env)
 
                 # --- Hot Reload: Construir/Refrescar topología en cada iteración ---
-                topology = build_topology_from_registry(goal, mode)
+                # # topology_regenerated = build_topology_from_registry(goal, mode) # FIXED: reuse original topology
                 topology.max_iterations = self.max_iterations
                 mission_dir = MISSIONS_DIR / topology.mission_id
 

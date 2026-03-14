@@ -3,7 +3,7 @@ import json
 import time
 import fcntl
 import glob
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal, Literal
 from core.telemetry import telemetry
 from core.neural_trace import inject_trace_context
 
@@ -15,13 +15,14 @@ class EventBus:
     """
     def __init__(self, bus_dir: str = ".cortex/bus"):
         self.bus_dir = bus_dir
+        self.bus_file = ".cortex/bus_buffer.jsonl"
         self.ack_path = ".cortex/bus_buffer.ack"
         os.makedirs(self.bus_dir, exist_ok=True)
 
     def _get_mailbox_path(self, agent_name: str) -> str:
         # Normalizar nombre para el sistema de archivos
         safe_name = agent_name.replace(" ", "_").lower()
-        return os.path.join(self.bus_dir, f"{safe_name}.jsonl")
+        return self.bus_file
 
     def publish(self, event_type: str, data: Dict[str, Any], sender: str = "SYSTEM"):
         """
@@ -51,7 +52,7 @@ class EventBus:
         
         telemetry.info(f"📡 MAILBOX [{sender}]: {event_type} persistido.")
 
-    def read_mailbox(self, agent_name: str, limit: int = 10) -> List[Dict[ Any]]:
+    def read_mailbox(self, agent_name: str, limit: int = 10) -> List[Dict[Any, Any]]:
         """
         Lee los últimos eventos del buzón de un agente específico.
         Implementa el Botón del Pánico (Guía 15) ante corrupción.
@@ -91,7 +92,7 @@ class EventBus:
     def read_all_events(self, limit_per_actor: int = 5) -> List[Dict[str, Any]]:
         """Agrega eventos de todos los buzones (usado por el Watchdog)."""
         all_events = []
-        for mailbox in glob.glob(os.path.join(self.bus_dir, "*.jsonl")):
+        for mailbox in [self.bus_file] if os.path.exists(self.bus_file) else []:
             agent_name = os.path.basename(mailbox).replace(".jsonl", "")
             all_events.extend(self.read_mailbox(agent_name, limit_per_actor))
         

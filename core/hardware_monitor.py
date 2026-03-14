@@ -3,7 +3,7 @@ import psutil
 import subprocess
 import json
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List, Optional, List
 
 class HardwareMonitor:
     """
