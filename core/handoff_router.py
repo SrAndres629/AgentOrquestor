@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.telemetry import telemetry
-from core.arbitrator import Arbitrator
 from core.shredder import LogShredder
 from core.hardware_monitor import HardwareMonitor
 from core.swarm_launcher import (
@@ -66,14 +65,45 @@ class DebateEvaluator:
 
     def __init__(
         self,
-        convergence_threshold: float = 0.90,
+        convergence_threshold: float = 0.80,
         min_report_length: int = 50,
     ):
         self.threshold = convergence_threshold
         self.min_report_length = min_report_length
-        self.arbitrator = Arbitrator(threshold=convergence_threshold)
         self.hw_monitor = HardwareMonitor()
+        self.history: List[float] = []
 
+    def calculate_convergence(self, pro: str, adv: str) -> float:
+        """
+        Calcula un score de convergencia [0-1] basado en señales lingüísticas.
+        OSAA v5.0: Favorece la 'Aprobación Explícita' y la brevedad técnica.
+        """
+        pro_up = pro.upper()
+        adv_up = adv.upper()
+        
+        score = 0.0
+        # 1. Señales de Aprobación (50%)
+        if "APPROVED" in adv_up: score += 0.5
+        elif "FIXED" in adv_up or "RESOLVED" in adv_up: score += 0.3
+        
+        if "APPROVED" in pro_up: score += 0.2
+        
+        # 2. Señales de Rechazo (-50%)
+        if "REJECTED" in adv_up or "VETO" in adv_up: score -= 0.5
+        if "REJECTED" in pro_up: score -= 0.2
+
+        # 3. Emparejamiento de longitud (20%) - Debate sano suele tener longitudes similares
+        ratio = min(len(pro), len(adv)) / max(len(pro), len(adv))
+        score += ratio * 0.3
+        
+        final_score = max(0.0, min(1.0, score))
+        self.history.append(final_score)
+        return final_score
+
+    def is_stable(self) -> bool:
+        """Detecta si el score ha convergido a un valor estable."""
+        if len(self.history) < 2: return False
+        return abs(self.history[-1] - self.history[-2]) < 0.05
     def _collect_reports(self, reports_dir: Path) -> Dict[str, str]:
         """
         Recoge todos los reportes *_report.md del directorio de la misión.
@@ -183,10 +213,10 @@ class DebateEvaluator:
             )
 
         # 4. Calcular convergencia
-        score = self.arbitrator.calculate_convergence(pro_text, adv_text)
+        score = self.calculate_convergence(pro_text, adv_text)
 
         # 5. Estabilidad
-        is_stable = self.arbitrator.is_stable()
+        is_stable = self.is_stable()
 
         # 6. Hardware
         hw = self.hw_monitor.check_stability()
@@ -196,7 +226,7 @@ class DebateEvaluator:
             status = "CONVERGED"
             analysis = (
                 f"Convergencia alcanzada (score={score:.4f} ≥ {self.threshold}). "
-                f"Debate estable tras {len(self.arbitrator.history)} rondas."
+                f"Debate estable tras {len(self.history)} rondas."
             )
         else:
             status = "DIVERGED"

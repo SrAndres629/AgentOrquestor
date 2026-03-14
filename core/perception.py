@@ -1,7 +1,6 @@
 import json
 from typing import Dict, Any, List
 from core.hardware_monitor import HardwareMonitor
-from core.chronicler import chronicler
 from core.telemetry import telemetry
 
 hardware_monitor = HardwareMonitor()
@@ -25,20 +24,16 @@ class PerceptionNode:
         hw_stats = hardware_monitor.check_stability()
         available_vram = hw_stats["vram"]["vram_total"] - hw_stats["vram"]["vram_used"]
         
-        # 1. Análisis de Precedentes
-        past_lessons = chronicler.get_relevant_lessons(user_goal)
-        has_precedent = len(past_lessons) > 0
-
-        # 2. Selección de Modo (Filtro de Supervivencia)
+        # 1. Selección de Modo (Filtro de Supervivencia)
         if available_vram < self.threshold_vram_low:
             mode = "FAST"
             justification = "VRAM Crítica detectada. Modo Supervivencia activo."
-        elif not has_precedent or any(kw in user_goal.lower() for kw in ["refactor", "optimizar", "core"]):
+        elif any(kw in user_goal.lower() for kw in ["refactor", "optimizar", "core", "audit"]):
             mode = "SLOW"
             justification = "Complejidad Estructural detectada. Requiere pensamiento lento."
         else:
             mode = "FAST"
-            justification = "Patrón conocido detectado. Optimizando para velocidad."
+            justification = "Objetivo estándar detectado. Optimizando para velocidad."
 
         # 3. Generación del Contrato Cognitivo (Framing)
         contract = self.generate_cognitive_contract(mode, available_vram)

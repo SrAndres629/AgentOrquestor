@@ -1,0 +1,13 @@
+{
+  "mission_id": "m_4d5c1df77cd9",
+  "iterations": [
+    {
+      "iteration": 1,
+      "signal": "timeout",
+      "agents_active": [],
+      "hw_status": "STABLE",
+      "terminals_killed": 0
+    }
+  ],
+  "status": "TIMEOUT"
+}

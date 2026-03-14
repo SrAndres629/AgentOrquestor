@@ -1,0 +1,1 @@
+[ERROR] Excepción durante inferencia: HTTP 429: {"error":{"message":"Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01jf6s7xkbepysgtz42bygkpe4` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 10261, Requested 2705. Please try again in 4.83s. Need more tokens? Upgrade to Dev Tier today 

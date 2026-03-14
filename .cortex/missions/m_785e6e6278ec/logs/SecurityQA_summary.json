@@ -1,0 +1,8 @@
+{
+  "agent": "SecurityQA",
+  "role": "adversary",
+  "rounds_completed": 3,
+  "consensus_reached": false,
+  "total_tokens": 2401,
+  "status": "COMPLETED"
+}

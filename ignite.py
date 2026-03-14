@@ -59,16 +59,32 @@ async def execute_mission(goal: str, mode: str = "DIALECTIC"):
 
 
 if __name__ == "__main__":
-    order = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Optimización Core"
-
-    # Soporte de modo por argumento: --mode DIALECTIC
+    # Soporte de modo por argumento: --mode DIALECTIC --goal "Objetivo"
     mode = "DIALECTIC"
+    order = ""
+    
     if "--mode" in sys.argv:
         idx = sys.argv.index("--mode")
         if idx + 1 < len(sys.argv):
             mode = sys.argv[idx + 1].upper()
-            # Limpiar del order
-            order = order.replace(f"--mode {sys.argv[idx + 1]}", "").strip()
+            
+    if "--goal" in sys.argv:
+        idx = sys.argv.index("--goal")
+        if idx + 1 < len(sys.argv):
+            order = sys.argv[idx + 1]
+    else:
+        # Fallback: todos los args que no sean --mode
+        remaining = []
+        skip_next = False
+        for i, arg in enumerate(sys.argv[1:], 1):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "--mode":
+                skip_next = True
+                continue
+            remaining.append(arg)
+        order = " ".join(remaining) if remaining else "Optimización Core"
 
     result = asyncio.run(execute_mission(order, mode))
     print(f"\n📋 Resultado: {result.get('status', 'N/A')}")

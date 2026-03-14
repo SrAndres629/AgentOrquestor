@@ -343,13 +343,15 @@ class TerminalMultiplexer:
             capture_output=True,
         )
 
-        # Construir comando de ejecución
+        # Construir comando de ejecución (con quoting para rutas con espacios)
+        import shlex
         venv_python = str(BASE_DIR / ".venv" / "bin" / "python")
         cmd_parts = [
-            venv_python, runner_script,
-            "--brain", str(brain_path),
-            "--mission-id", self.mission_id,
-            "--agent-name", agent.name,
+            shlex.quote(venv_python), 
+            shlex.quote(runner_script),
+            "--brain", shlex.quote(str(brain_path)),
+            "--mission-id", shlex.quote(self.mission_id),
+            "--agent-name", shlex.quote(agent.name),
         ]
         cmd = " ".join(cmd_parts)
 
