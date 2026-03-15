@@ -28,3 +28,26 @@ Para crear una nueva guía, el creador (humano o IA) debe seguir este flujo:
 <output_contract>
 (El contrato de salida de esta guía es el propio formato en el que está escrita. Toda nueva guía debe ser un clon estructural de este mismo documento).
 </output_contract>
+
+## Índice de Protocolos OSAA v6.0
+
+01. **Worker Protocol:** Conducta y ejecución de agentes.
+02. **Dialectic Engine:** Consenso y enrutamiento (Consensus Score).
+03. **Bootstrap Protocol:** Autofabricación de herramientas (SeedOrchestrator).
+04. **Tool Blueprint:** Diseño de nuevos MCP Servers.
+05. **Chronicler Protocol:** Gestión de memoria a largo plazo.
+06. **Mission Planner:** Descomposición de objetivos complejos.
+07. **Self-Awareness:** Monitoreo de introspección cognitiva.
+08. **Sepulturero Protocol:** Limpieza de procesos y hardware.
+09. **Inquisidor Protocol:** Verificación de integridad y seguridad.
+10. **Metabolic Governor:** Control de consumo de tokens y VRAM.
+11. **TDD Loop:** Ciclo de desarrollo guiado por pruebas.
+12. **Hardware Grounding:** Conexión con sensores físicos del host.
+13. **Business Standard:** Alineación con objetivos de negocio.
+14. **MCP Proxy Protocol:** Interfaz de herramientas externas.
+15. **Disaster Recovery:** Botón de pánico y restauración de bus.
+16. **Telemetry Optics:** Visualización de trazas neuronales.
+17. **MCP Unified Protocol:** Cableado real entre main.py y Core.
+18. **Swarm Deployment:** Orquestación en tmux y aislamiento.
+19. **Ouroboros Weaver:** Bucle autónomo de autocuración.
+20. **Context Shredder:** Optimización de VRAM y destilación de logs.
