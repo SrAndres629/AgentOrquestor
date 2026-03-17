@@ -30,9 +30,10 @@ class PerceptionEngine:
         """Ensambla el System Prompt estricto basado en la identidad del agente."""
         core_mind = []
         
-        # 1. Leyes Universales (Sobrevivir en tmux, truncar herramientas)
+        # 1. Leyes Universales (Sobrevivir en tmux, truncar herramientas, razonamiento, etc)
         core_mind.append(self._read_guide("00_meta_guide_protocol.md")) # Base v6.0
         core_mind.append(self._read_guide("01_worker_protocol.md"))
+        core_mind.append(self._read_guide("02_cognitive_cortex.md")) # Córtex Lógico mandatorio
         core_mind.append(self._read_guide("04_tool_blueprint.md"))
         
         # 2. Conciencia de Expansión (Guías 07-16)

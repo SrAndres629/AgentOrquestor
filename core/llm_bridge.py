@@ -89,7 +89,7 @@ class LLMBridge:
 
         for tool in catalog:
             name = tool["name"]
-            is_sovereign = name == "register_new_tool"
+            is_sovereign = name in ["register_new_tool", "sequentialthinking"]
             
             if not is_sovereign and allowed_tools and name not in allowed_tools:
                 continue

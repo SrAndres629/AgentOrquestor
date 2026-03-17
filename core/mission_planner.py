@@ -35,6 +35,7 @@ Si falta una grúa (Herramienta), llamar al Herrero (SeedOrchestrator) para fabr
 2. **Auditoría de Arsenal (Tool Vetting):** Si falta una herramienta, Fase 0 obligatoria al SeedOrchestrator.
 3. **Economía de Tripulación (Roster Selection):** Selecciona solo agentes estrictamente necesarios.
 4. **Claridad Táctica:** Instrucciones imperativas, sin saludos. Protege la VRAM.
+5. **Superpowers Workflow:** TODO DAG DEBE seguir la metodología de desarrollo: `brainstorming` -> `writing-plans` -> `test-driven-development` -> `subagent-driven-development` -> `requesting-code-review`. Considera estas fases como instinto base.
 </core_directives>
 
 <state_machine>
@@ -127,7 +128,8 @@ class MissionPlanner:
             "security": ["scan", "audit", "exploit", "security", "vulnerability"],
             "network": ["request", "api", "endpoint", "traffic", "http", "fetch"],
             "database": ["sql", "postgres", "sqlite", "database", "query", "supabase"],
-            "image": ["generate_image", "vision", "ocr", "image", "stable diffusion"]
+            "image": ["generate_image", "vision", "ocr", "image", "stable diffusion"],
+            "superpowers": ["tdd", "test", "plan", "review", "brainstorm", "subagent"]
         }
         
         # Obtener todas las herramientas cargadas en el registry
@@ -138,6 +140,19 @@ class MissionPlanner:
         telemetry.info(f"🔍 Auditoría de Capacidades: {len(set(all_loaded_tools))} herramientas en arsenal.")
 
         # Identificar necesidades implícitas
+        # --- NUEVO (V6.0 Superpowers) ---
+        # Si la misión apunta a ser compleja (SLOW), requerimos instintos procedimentales (superpowers)
+        is_complex = any(kw in goal_lower for kw in ["refactor", "optimizar", "core", "audit", "arquitectura", "sistema"])
+        if is_complex and "superpowers" not in [cap for cap in missing_tools]:
+            # Forzamos la verificación de superpowers aunque no se mencione explícitamente
+            has_superpowers = False
+            for t in all_loaded_tools:
+                if any(k in t.lower() for k in capabilities["superpowers"]):
+                    has_superpowers = True
+                    break
+            if not has_superpowers:
+                missing_tools.append("superpowers (flujos TDD/Subagent)")
+
         for cap, keywords in capabilities.items():
             if any(k in goal_lower for k in keywords):
                 # Verificar si algún agente tiene herramientas para esta capacidad

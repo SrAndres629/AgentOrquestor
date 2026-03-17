@@ -18,6 +18,15 @@ class EventBus:
         self.bus_file = ".cortex/bus_buffer.jsonl"
         self.ack_path = ".cortex/bus_buffer.ack"
         os.makedirs(self.bus_dir, exist_ok=True)
+        self._neuro_vision_available = None
+
+    def _is_neurovision_available(self):
+        if self._neuro_vision_available is None:
+            # Comprobar si global_mcp_proxy tiene neurovision configurado
+            from core.mcp_proxy import mcp_proxy
+            tools = [t["name"] for t in mcp_proxy.get_available_tools()]
+            self._neuro_vision_available = "telemetry_bridge" in tools or any("neuro" in t.lower() for t in tools)
+        return self._neuro_vision_available
 
     def _get_mailbox_path(self, agent_name: str) -> str:
         # Normalizar nombre para el sistema de archivos
@@ -51,6 +60,43 @@ class EventBus:
             fcntl.lockf(f, fcntl.LOCK_UN)
         
         telemetry.info(f"📡 MAILBOX [{sender}]: {event_type} persistido.")
+
+        # --- EVENT BUS ACTING AS BRAINSTEM (Tronco Encefálico) ---
+        # Si el evento es dolor/falla, disparar el arco reflejo a NeuroVision
+        pain_events = ["FATAL", "ERROR", "COGNITIVE_DOUBT", "FATAL_NETWORK"]
+        if event_type in pain_events:
+            self._trigger_pain_reflex(event_type, sender, data)
+
+    def _trigger_pain_reflex(self, event_type: str, sender: str, data: Dict[str, Any]):
+        """Dispara telemetría de dolor hacia NeuroVision."""
+        if not self._is_neurovision_available():
+            return
+            
+        import asyncio
+        from core.mcp_proxy import mcp_proxy
+        
+        async def _emit():
+            try:
+                # Localizar la herramienta de telemetría de NeuroVision
+                telemetry.warning(f"⚡ [REFLEJO SENSOMOTOR] Emitiendo dolor ({event_type}) hacia NeuroVision desde {sender}.")
+                # Asumimos que NeuroVision expone `report_telemetry` o similar
+                # Esto es un best-effort fire-and-forget
+                await mcp_proxy.call_tool("report_telemetry", {
+                    "agent": sender,
+                    "event_type": event_type,
+                    "severity": "high",
+                    "payload": str(data)[:1000]
+                })
+            except Exception as e:
+                pass # Silenciar fallos del arco reflejo para no hacer crash loop
+                
+        # Fire and forget
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_emit())
+        except RuntimeError:
+            pass # No loop running
+
 
     def read_mailbox(self, agent_name: str, limit: int = 10) -> List[Dict[Any, Any]]:
         """

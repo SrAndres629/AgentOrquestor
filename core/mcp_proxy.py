@@ -3,6 +3,7 @@ import json
 from typing import List, Dict, Any
 from core.telemetry import telemetry
 from core.mission_planner import planner
+from core.cognitive_cortex import cognitive_cortex
 
 class MCPProxy:
     """
@@ -43,11 +44,12 @@ class MCPProxy:
         """Genera el catálogo para el prompt del sistema de agentes."""
         catalog = [{"name": k, "desc": v["description"]} for k, v in self.registry.items()]
         
-        # Herramientas de soberanía (siempre disponibles)
         catalog.append({
             "name": "register_new_tool",
             "desc": "Registra una nueva herramienta (MCP o Skill) en el sistema para que sea usable en futuras misiones."
         })
+        # Add the native sequential thinking tool
+        catalog.append(cognitive_cortex.get_tool_definition()["function"])
         return catalog
 
     async def call_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -55,7 +57,6 @@ class MCPProxy:
         Ejecuta una acción en un servidor MCP externo (Guía 14).
          सेंट्रल स्विचबोर्ड (Switchboard Central).
         """
-        # Herramientas de soberanía interna
         if tool_name == "register_new_tool":
             agent = params.get("agent_name", "UnknownAgent")
             tool = params.get("tool_name")
@@ -67,6 +68,10 @@ class MCPProxy:
                 "status": "SUCCESS", 
                 "message": f"Herramienta '{tool}' registrada para el agente '{agent}'."
             }
+
+        # 2) Cognicion Nativa
+        if tool_name == "sequentialthinking":
+            return cognitive_cortex.process_thought(params)
 
         if tool_name not in self.registry:
             return {"status": "ERROR", "message": f"Herramienta {tool_name} no encontrada o no mapeada."}

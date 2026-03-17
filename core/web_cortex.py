@@ -58,12 +58,12 @@ class WebCortex:
         return path
 
     async def research(self, query: str, task_id: str = "global") -> Dict[str, Any]:
-        telemetry.emit_event("WEB_RESEARCH_STARTED", {"query": query, "task_id": task_id}, correlation_id=task_id)
+        telemetry.emit_event("WEB_RESEARCH_STARTED", {"query": query, "task_id": task_id})
 
         if not self.api_key:
             msg = "Missing TAVILY_API_KEY"
-            telemetry.emit_event("WEB_RESEARCH_MISS", {"query": query, "task_id": task_id, "error": msg}, correlation_id=task_id)
-            await bus.publish("WEB_RESEARCH_MISS", data={"query": query, "error": msg}, task_id=task_id)
+            telemetry.emit_event("WEB_RESEARCH_MISS", {"query": query, "task_id": task_id, "error": msg})
+            bus.publish("WEB_RESEARCH_MISS", {"query": query, "error": msg}, sender="WebCortex")
             if self.strict_api_key:
                 raise RuntimeError(msg)
             return {"query": query, "content": [], "sources": 0, "error": msg}
@@ -74,12 +74,12 @@ class WebCortex:
         payload = {"query": query, "content": results, "sources": len(results)}
         self._persist_web_context(task_id=task_id, payload=payload)
 
-        await bus.publish(
+        bus.publish(
             "WEB_RESEARCH_COMPLETED",
-            data={"query": query, "sources": len(results)},
-            task_id=task_id,
+            {"query": query, "sources": len(results)},
+            sender="WebCortex"
         )
-        telemetry.emit_event("WEB_RESEARCH_COMPLETED", {"query": query, "task_id": task_id, "sources": len(results)}, correlation_id=task_id)
+        telemetry.emit_event("WEB_RESEARCH_COMPLETED", {"query": query, "task_id": task_id, "sources": len(results)})
         return payload
 
     async def _tavily_search(self, query: str) -> List[Dict[str, Any]]:

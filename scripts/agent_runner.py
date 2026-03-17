@@ -364,7 +364,7 @@ class LLMInferenceBridge:
             name = tool["name"]
             
             # Herramientas de soberanía siempre visibles
-            is_sovereign = name == "register_new_tool"
+            is_sovereign = name in ["register_new_tool", "sequentialthinking"]
             
             if not is_sovereign and allowed_tools and name not in allowed_tools:
                 continue
@@ -508,6 +508,15 @@ class LLMInferenceBridge:
                             f"⏳ [{self.provider}] Rate Limit (429). Reintentando en {delay:.1f}s... "
                             f"(Intento {attempt + 1}/{max_retries})"
                         )
+                        
+                        # Inyectar dolor en NeuroVision
+                        from core.event_bus import bus
+                        bus.publish("FATAL_NETWORK", {
+                            "mission_id": getattr(self, "mission_id", "orphan"),
+                            "error": "429 Rate Limit (Asfixia Metabólica)",
+                            "provider": self.provider
+                        }, sender=getattr(self, "agent_name", "LLMBridge"))
+                        
                         await asyncio.sleep(delay)
                         continue
                     
@@ -579,6 +588,7 @@ class LLMInferenceBridge:
                 "tool_calls": List[Dict],  # Herramientas ejecutadas
             }
         """
+        self._has_thought_this_turn = False
         messages = self._build_messages(system_prompt, debate_history, current_task)
         self._tool_calls_executed = []
 
@@ -635,6 +645,27 @@ class LLMInferenceBridge:
 
                     # Agregar el mensaje del asistente con tool_calls
                     messages.append(message)
+
+                    # --- VETO METABÓLICO (Guía 02) ---
+                    mutant_tools = ["write_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "run_command", "git_autocommit", "git_commit", "git_push"]
+                    current_tool_names = [tc.get("function", {}).get("name", "") for tc in tool_calls]
+                    
+                    if "sequentialthinking" in current_tool_names:
+                        self._has_thought_this_turn = True
+                        
+                    has_mutant = any(t in mutant_tools for t in current_tool_names)
+                    if has_mutant and not getattr(self, "_has_thought_this_turn", False):
+                        telemetry.warning(f"🛑 [VETO METABÓLICO] El agente intentó iterar sin razonamiento previo.")
+                        veto_results = []
+                        for tc in tool_calls:
+                            veto_results.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id"),
+                                "content": json.dumps({"status": "ERROR", "message": "VETO METABÓLICO: Debes razonar tu plan paso a paso usando sequentialthinking antes de ejecutar acciones en el sistema."})
+                            })
+                        messages.extend(veto_results)
+                        payload["messages"] = messages
+                        continue
 
                     # Ejecutar herramientas y obtener resultados (Titanium Funnel Applied - Guide 04)
                     tool_results = await self._execute_tool_calls(tool_calls)
@@ -1112,11 +1143,30 @@ class AgentRunner:
             token = None
             if ctx:
                 token = propagate.attach(ctx)
-            
             tracer = get_tracer("agent_runner")
             with NeuralSpan.agent_span(tracer, f"Round {round_num + 1} - {self.agent_name}", current_task):
+                
+                # --- NUEVO: ZERO-SHOT COGNITIVE PRE-FLIGHT (OSAA v6.0) ---
+                from core.cognitive_cortex import cognitive_cortex
+                context_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in debate_history[-3:]]) # Últimos 3 mensajes
+                
+                telemetry.info(f"🧠 [{self.agent_name}] Iniciando Cognitive Pre-Flight...")
+                pre_flight_thought = await cognitive_cortex.generate_zero_shot_thought(
+                    agent_role=self.agent_role,
+                    context=context_str,
+                    current_task=current_task
+                )
+                
+                # Mutar la tarea actual inyectando la cadena de pensamiento como axioma
+                axiomatic_task = (
+                    f"He realizado un Cognitive Pre-Flight y he llegado a la siguiente cadena de razonamiento:\n"
+                    f"<sequential_thought>\n{pre_flight_thought}\n</sequential_thought>\n\n"
+                    f"Basándote EXCLUSIVAMENTE en este razonamiento previo, ejecuta las herramientas necesarias "
+                    f"para cumplir la tarea original:\n{current_task}"
+                )
+                
                 # 2e. Inferencia Centralizada (v6.0)
-                messages = self.llm._build_messages(self.system_prompt, debate_history, current_task)
+                messages = self.llm._build_messages(self.system_prompt, debate_history, axiomatic_task)
                 tool_defs = self.llm._build_tool_definitions(self.allowed_tools)
                 
                 inference_result = await self.llm.infer(
